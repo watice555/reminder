@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f4ef" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="循环提醒" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>循环提醒</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>循环提醒</h1>
+          <p id="summary">正在读取本地数据</p>
+        </div>
+        <button class="primary-button" id="newTaskButton" type="button">新增</button>
+      </header>
+
+      <section class="backup-panel" aria-label="备份">
+        <button class="ghost-button" id="exportButton" type="button">导出 JSON</button>
+        <button class="ghost-button" id="importButton" type="button">导入 JSON</button>
+        <button class="ghost-button" id="installButton" type="button" hidden>安装到主屏幕</button>
+      </section>
+
+      <section class="notice" id="storageNotice" hidden></section>
+
+      <section class="task-list" id="taskList" aria-live="polite"></section>
+    </main>
+
+    <dialog class="task-dialog" id="taskDialog">
+      <form id="taskForm" method="dialog">
+        <h2 id="taskDialogTitle">新增任务</h2>
+        <label>
+          任务名称
+          <input id="taskNameInput" name="name" autocomplete="off" placeholder="例如：换滤芯" required />
+        </label>
+        <label>
+          循环小时数
+          <input
+            id="intervalInput"
+            name="intervalHours"
+            inputmode="decimal"
+            min="0.1"
+            step="0.1"
+            type="number"
+            value="48"
+            required
+          />
+        </label>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="cancelTaskButton" type="button">取消</button>
+          <button class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="data-dialog" id="dataDialog">
+      <div class="data-panel">
+        <h2 id="dataDialogTitle">导出 JSON</h2>
+        <textarea id="dataText" spellcheck="false"></textarea>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="closeDataButton" type="button">关闭</button>
+          <button class="primary-button" id="confirmImportButton" type="button" hidden>导入</button>
+        </div>
+      </div>
+    </dialog>
+
+    <template id="taskTemplate">
+      <article class="task-card">
+        <div class="task-card__top">
+          <div>
+            <h2 class="task-name"></h2>
+            <p class="task-cycle"></p>
+          </div>
+          <span class="task-status"></span>
+        </div>
+        <p class="task-remaining"></p>
+        <p class="task-date task-due"></p>
+        <p class="task-date task-completed"></p>
+        <div class="task-actions">
+          <button class="done-button" type="button">完成并重置</button>
+          <button class="small-button edit-button" type="button">编辑</button>
+          <button class="delete-button" type="button">删除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

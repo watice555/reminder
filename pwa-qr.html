@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PWA QR</title>
+    <style>
+      body {
+        align-items: center;
+        background: #f6f4ef;
+        color: #1f2933;
+        display: flex;
+        font-family: Arial, "Microsoft YaHei", sans-serif;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      main {
+        background: #fff;
+        border: 1px solid #e5e0d8;
+        border-radius: 8px;
+        padding: 28px;
+        text-align: center;
+      }
+
+      img {
+        display: block;
+        height: 280px;
+        margin: 18px auto;
+        width: 280px;
+      }
+
+      code {
+        background: #eef2f6;
+        border-radius: 6px;
+        display: inline-block;
+        padding: 8px 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>用 iPhone 相机扫码</h1>
+      <p>在 Safari 打开后，用分享按钮添加到主屏幕。</p>
+      <img
+        alt="PWA QR"
+        src="https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=http%3A%2F%2F192.168.3.162%3A4173%2F"
+      />
+      <code>http://192.168.3.162:4173/</code>
+    </main>
+  </body>
+</html>

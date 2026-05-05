@@ -1,0 +1,15 @@
+
+> reminder@1.0.0 start
+> expo start
+
+Starting project at D:\Projects_local\reminder
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+iOS .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+iOS .\index.ts ▓▓▓▓▓▓▓▓░░░░░░░░ 51.0% (311/440)
+iOS Bundled 6715ms index.ts (691 modules)
+ WARN  SafeAreaView has been deprecated and will be removed in a future release. Please use 'react-native-safe-area-context' instead. See https://github.com/th3rdwave/react-native-safe-area-context
+iOS .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+iOS Bundled 21ms index.ts (1 module)
+ WARN  SafeAreaView has been deprecated and will be removed in a future release. Please use 'react-native-safe-area-context' instead. See https://github.com/th3rdwave/react-native-safe-area-context
