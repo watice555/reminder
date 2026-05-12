@@ -192,6 +192,50 @@ h1 {
   color: #b23923;
 }
 
+.task-progress {
+  margin-top: 16px;
+}
+
+.task-progress__meta {
+  align-items: center;
+  color: #374151;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.task-progress__value {
+  color: #17613a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.task-card.is-overdue .task-progress__value {
+  color: #b23923;
+}
+
+.task-progress__track {
+  background: #eef2f6;
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.task-progress__fill {
+  background: #17613a;
+  border-radius: inherit;
+  height: 100%;
+  transition: width 180ms ease;
+  width: 0%;
+}
+
+.task-card.is-overdue .task-progress__fill {
+  background: #d94f36;
+}
+
 .task-actions {
   display: flex;
   flex-wrap: wrap;
@@ -234,6 +278,36 @@ label {
   font-weight: 700;
   gap: 8px;
   margin-top: 14px;
+}
+
+.field-label {
+  color: #374151;
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.interval-fields {
+  margin-top: 14px;
+}
+
+.interval-fields label {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0;
+}
+
+.interval-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.interval-fields .field-label {
+  grid-column: 1 / -1;
 }
 
 input,

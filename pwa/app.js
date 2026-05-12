@@ -33,7 +33,8 @@ const elements = {
   taskForm: document.querySelector('#taskForm'),
   taskDialogTitle: document.querySelector('#taskDialogTitle'),
   taskNameInput: document.querySelector('#taskNameInput'),
-  intervalInput: document.querySelector('#intervalInput'),
+  intervalDaysInput: document.querySelector('#intervalDaysInput'),
+  intervalHoursInput: document.querySelector('#intervalHoursInput'),
   cancelTaskButton: document.querySelector('#cancelTaskButton'),
   dataDialog: document.querySelector('#dataDialog'),
   dataDialogTitle: document.querySelector('#dataDialogTitle'),
@@ -191,15 +192,15 @@ async function handleTaskSubmit(event) {
   event.preventDefault();
 
   const name = elements.taskNameInput.value.trim();
-  const intervalHours = Number(elements.intervalInput.value);
+  const intervalHours = parseFormInterval();
 
   if (!name) {
     alert('请输入任务名称。');
     return;
   }
 
-  if (!Number.isFinite(intervalHours) || intervalHours <= 0) {
-    alert('请输入大于 0 的小时数，例如 48。');
+  if (intervalHours === null) {
+    alert('请输入大于 0 的循环时间。天和小时都可以不填，不填按 0 计算。');
     return;
   }
 
@@ -267,7 +268,7 @@ function openTaskDialog(task = null) {
   editingTaskId = task?.id || null;
   elements.taskDialogTitle.textContent = task ? '编辑任务' : '新增任务';
   elements.taskNameInput.value = task?.name || '';
-  elements.intervalInput.value = task ? String(task.intervalHours) : String(DEFAULT_INTERVAL_HOURS);
+  setIntervalInputs(task?.intervalHours || DEFAULT_INTERVAL_HOURS);
   elements.taskDialog.showModal();
   setTimeout(() => elements.taskNameInput.focus(), 50);
 }
@@ -275,7 +276,7 @@ function openTaskDialog(task = null) {
 function closeTaskDialog() {
   editingTaskId = null;
   elements.taskForm.reset();
-  elements.intervalInput.value = String(DEFAULT_INTERVAL_HOURS);
+  setIntervalInputs(DEFAULT_INTERVAL_HOURS);
   elements.taskDialog.close();
 }
 
@@ -348,7 +349,7 @@ function render() {
   if (!sortedTasks.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.innerHTML = '<strong>还没有任务</strong><span>新增一个任务，例如“换滤芯”，设置 48 小时循环。</span>';
+    empty.innerHTML = '<strong>还没有任务</strong><span>新增一个任务，例如“换滤芯”，设置 2 天循环。</span>';
     elements.taskList.append(empty);
     return;
   }
@@ -357,10 +358,12 @@ function render() {
     const card = elements.taskTemplate.content.firstElementChild.cloneNode(true);
     const remainingMs = new Date(task.nextDueAt).getTime() - now;
     const isOverdue = remainingMs <= 0;
+    const progress = getCycleProgress(task, now);
+    const progressPercent = Math.round(progress * 100);
 
     card.classList.toggle('is-overdue', isOverdue);
     card.querySelector('.task-name').textContent = task.name;
-    card.querySelector('.task-cycle').textContent = `${task.intervalHours} 小时循环`;
+    card.querySelector('.task-cycle').textContent = `${formatInterval(task.intervalHours)}循环`;
     card.querySelector('.task-status').textContent = isOverdue ? '已到期' : '进行中';
     card.querySelector('.task-status').classList.toggle('is-active', !isOverdue);
     card.querySelector('.task-status').classList.toggle('is-overdue', isOverdue);
@@ -369,6 +372,9 @@ function render() {
       : `剩余 ${formatDuration(remainingMs)}`;
     card.querySelector('.task-due').textContent = `下次到期：${formatDateTime(task.nextDueAt)}`;
     card.querySelector('.task-completed').textContent = `上次完成：${formatDateTime(task.lastCompletedAt)}`;
+    card.querySelector('.task-progress').setAttribute('aria-label', `当前循环已过去 ${progressPercent}%`);
+    card.querySelector('.task-progress__value').textContent = `已过去 ${progressPercent}%`;
+    card.querySelector('.task-progress__fill').style.width = `${progressPercent}%`;
     card.querySelector('.done-button').addEventListener('click', () => completeTask(task.id));
     card.querySelector('.edit-button').addEventListener('click', () => openTaskDialog(task));
     card.querySelector('.delete-button').addEventListener('click', () => deleteTask(task.id));
@@ -379,6 +385,38 @@ function render() {
 
 function addHours(date, hours) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function parseFormInterval() {
+  const days = parseOptionalNumber(elements.intervalDaysInput.value);
+  const hours = parseOptionalNumber(elements.intervalHoursInput.value);
+
+  if (days === null || hours === null || days < 0 || hours < 0) {
+    return null;
+  }
+
+  const intervalHours = days * 24 + hours;
+  return intervalHours > 0 ? intervalHours : null;
+}
+
+function parseOptionalNumber(value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function setIntervalInputs(intervalHours) {
+  const normalizedHours =
+    Number.isFinite(intervalHours) && intervalHours > 0 ? intervalHours : DEFAULT_INTERVAL_HOURS;
+  const days = Math.floor(normalizedHours / 24);
+  const hours = normalizedHours - days * 24;
+
+  elements.intervalDaysInput.value = days ? String(days) : '';
+  elements.intervalHoursInput.value = hours ? formatNumber(hours) : '';
 }
 
 function createId() {
@@ -400,6 +438,37 @@ function formatDuration(ms) {
   }
 
   return `${minutes} 分钟`;
+}
+
+function getCycleProgress(task, now) {
+  const lastCompletedAt = new Date(task.lastCompletedAt).getTime();
+  const intervalMs = task.intervalHours * 60 * 60 * 1000;
+
+  if (!Number.isFinite(lastCompletedAt) || !Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, (now - lastCompletedAt) / intervalMs));
+}
+
+function formatInterval(intervalHours) {
+  const days = Math.floor(intervalHours / 24);
+  const hours = intervalHours - days * 24;
+  const parts = [];
+
+  if (days > 0) {
+    parts.push(`${days} 天`);
+  }
+
+  if (hours > 0) {
+    parts.push(`${formatNumber(hours)} 小时`);
+  }
+
+  return parts.length ? parts.join(' ') : '0 小时';
+}
+
+function formatNumber(value) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 function formatDateTime(value) {

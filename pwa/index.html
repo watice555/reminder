@@ -39,19 +39,33 @@
           任务名称
           <input id="taskNameInput" name="name" autocomplete="off" placeholder="例如：换滤芯" required />
         </label>
-        <label>
-          循环小时数
-          <input
-            id="intervalInput"
-            name="intervalHours"
-            inputmode="decimal"
-            min="0.1"
-            step="0.1"
-            type="number"
-            value="48"
-            required
-          />
-        </label>
+        <div class="interval-fields">
+          <span class="field-label">循环时间</span>
+          <label>
+            <input
+              id="intervalDaysInput"
+              name="intervalDays"
+              inputmode="numeric"
+              min="0"
+              step="1"
+              type="number"
+              placeholder="0"
+            />
+            天
+          </label>
+          <label>
+            <input
+              id="intervalHoursInput"
+              name="intervalHours"
+              inputmode="decimal"
+              min="0"
+              step="0.1"
+              type="number"
+              placeholder="0"
+            />
+            小时
+          </label>
+        </div>
         <div class="dialog-actions">
           <button class="ghost-button" id="cancelTaskButton" type="button">取消</button>
           <button class="primary-button" type="submit">保存</button>
@@ -82,6 +96,15 @@
         <p class="task-remaining"></p>
         <p class="task-date task-due"></p>
         <p class="task-date task-completed"></p>
+        <div class="task-progress" aria-label="本轮进度">
+          <div class="task-progress__meta">
+            <span>本轮进度</span>
+            <strong class="task-progress__value"></strong>
+          </div>
+          <div class="task-progress__track">
+            <div class="task-progress__fill"></div>
+          </div>
+        </div>
         <div class="task-actions">
           <button class="done-button" type="button">完成并重置</button>
           <button class="small-button edit-button" type="button">编辑</button>

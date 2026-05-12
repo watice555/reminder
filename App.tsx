@@ -27,6 +27,7 @@ type ReminderTask = {
 
 type TaskFormState = {
   name: string;
+  intervalDays: string;
   intervalHours: string;
 };
 
@@ -35,7 +36,7 @@ const DEFAULT_INTERVAL_HOURS = 48;
 
 const initialForm: TaskFormState = {
   name: '',
-  intervalHours: String(DEFAULT_INTERVAL_HOURS),
+  ...splitIntervalHours(DEFAULT_INTERVAL_HOURS),
 };
 
 export default function App() {
@@ -109,7 +110,7 @@ export default function App() {
     setEditingTask(task);
     setForm({
       name: task.name,
-      intervalHours: String(task.intervalHours),
+      ...splitIntervalHours(task.intervalHours),
     });
     setIsFormOpen(true);
   }
@@ -122,15 +123,15 @@ export default function App() {
 
   function submitTask() {
     const name = form.name.trim();
-    const intervalHours = Number(form.intervalHours);
+    const intervalHours = parseFormInterval(form);
 
     if (!name) {
       Alert.alert('缺少名称', '请输入任务名称。');
       return;
     }
 
-    if (!Number.isFinite(intervalHours) || intervalHours <= 0) {
-      Alert.alert('循环时间无效', '请输入大于 0 的小时数，例如 48。');
+    if (intervalHours === null) {
+      Alert.alert('循环时间无效', '请输入大于 0 的循环时间。天和小时都可以不填，不填按 0 计算。');
       return;
     }
 
@@ -262,7 +263,7 @@ export default function App() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>还没有任务</Text>
-                <Text style={styles.emptyText}>新增一个任务，例如“换滤芯”，设置 48 小时循环。</Text>
+                <Text style={styles.emptyText}>新增一个任务，例如“换滤芯”，设置 2 天循环。</Text>
               </View>
             }
           />
@@ -311,13 +312,15 @@ function TaskCard({
   const nextDueAt = new Date(task.nextDueAt).getTime();
   const remainingMs = nextDueAt - now;
   const isOverdue = remainingMs <= 0;
+  const progress = getCycleProgress(task, now);
+  const progressPercent = Math.round(progress * 100);
 
   return (
     <View style={[styles.card, isOverdue && styles.overdueCard]}>
       <View style={styles.cardTopRow}>
         <View style={styles.cardTitleWrap}>
           <Text style={styles.taskName}>{task.name}</Text>
-          <Text style={styles.taskMeta}>{task.intervalHours} 小时循环</Text>
+          <Text style={styles.taskMeta}>{formatInterval(task.intervalHours)}循环</Text>
         </View>
         <Text style={[styles.statusPill, isOverdue ? styles.statusOverdue : styles.statusActive]}>
           {isOverdue ? '已到期' : '进行中'}
@@ -330,6 +333,27 @@ function TaskCard({
         </Text>
         <Text style={styles.dueText}>下次到期：{formatDateTime(task.nextDueAt)}</Text>
         <Text style={styles.dueText}>上次完成：{formatDateTime(task.lastCompletedAt)}</Text>
+      </View>
+
+      <View
+        style={styles.progressBlock}
+        accessibilityLabel={`当前循环已过去 ${progressPercent}%`}
+      >
+        <View style={styles.progressMetaRow}>
+          <Text style={styles.progressLabel}>本轮进度</Text>
+          <Text style={[styles.progressValue, isOverdue && styles.progressValueOverdue]}>
+            已过去 {progressPercent}%
+          </Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              isOverdue && styles.progressFillOverdue,
+              { width: `${progressPercent}%` },
+            ]}
+          />
+        </View>
       </View>
 
       <View style={styles.cardActions}>
@@ -380,14 +404,29 @@ function TaskFormModal({
             returnKeyType="next"
           />
 
-          <Text style={styles.label}>循环小时数</Text>
-          <TextInput
-            value={form.intervalHours}
-            onChangeText={(intervalHours) => onChange({ ...form, intervalHours })}
-            placeholder="48"
-            keyboardType="decimal-pad"
-            style={styles.input}
-          />
+          <Text style={styles.label}>循环时间</Text>
+          <View style={styles.intervalRow}>
+            <View style={styles.intervalField}>
+              <TextInput
+                value={form.intervalDays}
+                onChangeText={(intervalDays) => onChange({ ...form, intervalDays })}
+                placeholder="0"
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+              <Text style={styles.intervalUnit}>天</Text>
+            </View>
+            <View style={styles.intervalField}>
+              <TextInput
+                value={form.intervalHours}
+                onChangeText={(intervalHours) => onChange({ ...form, intervalHours })}
+                placeholder="0"
+                keyboardType="decimal-pad"
+                style={styles.input}
+              />
+              <Text style={styles.intervalUnit}>小时</Text>
+            </View>
+          </View>
 
           <View style={styles.modalActions}>
             <Pressable style={styles.secondaryButton} onPress={onClose}>
@@ -482,6 +521,40 @@ function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
 
+function parseFormInterval(form: TaskFormState) {
+  const days = parseOptionalNumber(form.intervalDays);
+  const hours = parseOptionalNumber(form.intervalHours);
+
+  if (days === null || hours === null || days < 0 || hours < 0) {
+    return null;
+  }
+
+  const intervalHours = days * 24 + hours;
+  return intervalHours > 0 ? intervalHours : null;
+}
+
+function parseOptionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function splitIntervalHours(intervalHours: number): Pick<TaskFormState, 'intervalDays' | 'intervalHours'> {
+  const normalizedHours =
+    Number.isFinite(intervalHours) && intervalHours > 0 ? intervalHours : DEFAULT_INTERVAL_HOURS;
+  const days = Math.floor(normalizedHours / 24);
+  const hours = normalizedHours - days * 24;
+
+  return {
+    intervalDays: days ? String(days) : '',
+    intervalHours: hours ? formatNumber(hours) : '',
+  };
+}
+
 function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -501,6 +574,37 @@ function formatDuration(ms: number) {
   }
 
   return `${minutes} 分钟`;
+}
+
+function getCycleProgress(task: ReminderTask, now: number) {
+  const lastCompletedAt = new Date(task.lastCompletedAt).getTime();
+  const intervalMs = task.intervalHours * 60 * 60 * 1000;
+
+  if (!Number.isFinite(lastCompletedAt) || !Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, (now - lastCompletedAt) / intervalMs));
+}
+
+function formatInterval(intervalHours: number) {
+  const days = Math.floor(intervalHours / 24);
+  const hours = intervalHours - days * 24;
+  const parts = [];
+
+  if (days > 0) {
+    parts.push(`${days} 天`);
+  }
+
+  if (hours > 0) {
+    parts.push(`${formatNumber(hours)} 小时`);
+  }
+
+  return parts.length ? parts.join(' ') : '0 小时';
+}
+
+function formatNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 function formatDateTime(value: string) {
@@ -674,6 +778,43 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 6,
   },
+  progressBlock: {
+    marginTop: 16,
+  },
+  progressMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  progressLabel: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  progressValue: {
+    color: '#17613a',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  progressValueOverdue: {
+    color: '#b23923',
+  },
+  progressTrack: {
+    backgroundColor: '#eef2f6',
+    borderRadius: 999,
+    height: 10,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    backgroundColor: '#17613a',
+    borderRadius: 999,
+    height: '100%',
+  },
+  progressFillOverdue: {
+    backgroundColor: '#d94f36',
+  },
   cardActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -789,6 +930,21 @@ const styles = StyleSheet.create({
     fontSize: 17,
     minHeight: 48,
     paddingHorizontal: 12,
+  },
+  intervalRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  intervalField: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  intervalUnit: {
+    color: '#374151',
+    fontSize: 15,
+    fontWeight: '700',
   },
   textArea: {
     backgroundColor: '#f9fafb',
