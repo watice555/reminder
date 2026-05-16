@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f4ef" />
+    <title>更新循环提醒</title>
+    <style>
+      :root {
+        color: #1f2937;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f4ef;
+      }
+
+      body {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      main {
+        max-width: 420px;
+        width: 100%;
+      }
+
+      h1 {
+        font-size: 24px;
+        margin: 0 0 12px;
+      }
+
+      p {
+        color: #4b5563;
+        font-size: 15px;
+        line-height: 1.7;
+        margin: 0 0 20px;
+      }
+
+      button {
+        background: #1f6f43;
+        border: 0;
+        border-radius: 8px;
+        color: #fff;
+        font: inherit;
+        font-weight: 800;
+        min-height: 46px;
+        padding: 0 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>正在更新</h1>
+      <p id="status">正在清理旧的离线缓存，稍后会自动打开新版。</p>
+      <button id="retryButton" type="button" hidden>重新尝试</button>
+    </main>
+
+    <script>
+      const statusElement = document.querySelector('#status');
+      const retryButton = document.querySelector('#retryButton');
+
+      retryButton.addEventListener('click', resetApp);
+      resetApp();
+
+      async function resetApp() {
+        retryButton.hidden = true;
+
+        try {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+
+          if ('caches' in window) {
+            const cacheKeys = await caches.keys();
+            await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+          }
+
+          statusElement.textContent = '旧缓存已清理，正在打开新版。';
+          window.location.replace(`./?updated=${Date.now()}`);
+        } catch {
+          statusElement.textContent = '自动更新失败。请关闭页面后重新打开，或点按钮再试一次。';
+          retryButton.hidden = false;
+        }
+      }
+    </script>
+  </body>
+</html>
