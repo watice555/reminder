@@ -78,9 +78,41 @@ function registerServiceWorker() {
     return;
   }
 
-  navigator.serviceWorker.register('./sw.js').catch(() => {
-    showStorageNotice('离线缓存注册失败。任务仍会保存，但离线打开可能不可用。');
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) {
+      return;
+    }
+
+    refreshing = true;
+    window.location.reload();
   });
+
+  navigator.serviceWorker
+    .register('./sw.js', { updateViaCache: 'none' })
+    .then((registration) => {
+      registration.update();
+
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+
+      registration.addEventListener('updatefound', () => {
+        const installingWorker = registration.installing;
+        if (!installingWorker) {
+          return;
+        }
+
+        installingWorker.addEventListener('statechange', () => {
+          if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            installingWorker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    })
+    .catch(() => {
+      showStorageNotice('离线缓存注册失败。任务仍会保存，但离线打开可能不可用。');
+    });
 }
 
 async function prepareStorage() {

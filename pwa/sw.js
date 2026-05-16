@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cycle-reminder-pwa-v2';
+const CACHE_NAME = 'cycle-reminder-pwa-v3';
 const APP_ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const APP_ASSETS = [
   './manifest.webmanifest',
   './icon.svg',
 ];
+const APP_ASSET_URLS = new Set(APP_ASSETS.map((asset) => new URL(asset, self.location).href));
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_ASSETS)));
@@ -17,9 +18,27 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+      .then(async (keys) => {
+        const staleKeys = keys.filter((key) => key !== CACHE_NAME);
+        await Promise.all(staleKeys.map((key) => caches.delete(key)));
+        await self.clients.claim();
+
+        if (staleKeys.length === 0) {
+          return;
+        }
+
+        const windowClients = await self.clients.matchAll({ type: 'window' });
+        await Promise.all(
+          windowClients.map((client) => {
+            if ('navigate' in client) {
+              return client.navigate(client.url).catch(() => undefined);
+            }
+
+            return undefined;
+          }),
+        );
+      }),
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
@@ -27,13 +46,36 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
 
-      return fetch(event.request).catch(() => caches.match('./index.html'));
-    }),
-  );
+  if (event.request.mode === 'navigate' || APP_ASSET_URLS.has(requestUrl.href)) {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
+
+  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+});
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+
+    return response;
+  } catch {
+    return (await caches.match(request)) || caches.match('./index.html');
+  }
+}
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
