@@ -1,43 +1,117 @@
 # 循环提醒
 
-一个离线优先的循环任务倒计时工具。记录需要定期完成的事项（如换滤芯、浇花、备份），自动计算剩余时间，到期醒目提醒。
+一个离线优先的循环任务倒计时工具。项目以 Web/PWA 为功能基准，并提供纯 SwiftUI 编写的 iOS App。
 
 ## 功能
 
-- 创建任务，设置循环间隔（天/小时）
-- 实时倒计时，到期高亮显示
-- 展示当前循环已过去的进度条
-- 一键"完成并重置"，自动计算下次到期时间
-- 导入/导出 JSON 备份
-- PWA 离线可用，可安装到桌面
+- 创建、编辑、删除循环任务，循环时间支持天和小时
+- 实时倒计时、到期高亮与当前周期进度
+- 一键“完成并重置”，从实际完成时刻计算下次到期时间
+- 记录每一次完成操作及当时的计划到期时间、循环间隔
+- 完成统计：今天、近 7 天、累计完成、准时率、7 日趋势与任务排行
+- JSON 备份导入和导出，Web 与 iOS 使用相同格式
+- PWA 可离线使用并安装到主屏幕
 
-## 技术栈
+> 统计从升级到 v2 后开始。旧任务的当前周期会保留，但不会把旧的 `lastCompletedAt` 伪造成历史完成记录。
+
+## 项目结构
 
 | 平台 | 目录 | 技术 |
-|------|------|------|
-| iOS / Android | `App.tsx` | Expo SDK 54 + React Native |
-| Web (PWA) | `pwa/` | 原生 HTML/CSS/JS，Service Worker + IndexedDB |
+| --- | --- | --- |
+| Web / PWA | `pwa/` | 原生 HTML/CSS/JS、Service Worker、IndexedDB |
+| iOS | `ios/` | SwiftUI、Foundation、Xcode 工程，无第三方依赖 |
 
-两套实现功能完全一致，共享相同的数据格式。
+原 Expo / React Native 实现已经移除。
 
-## 本地开发
+## Web 本地开发
+
+需要 Node.js，无需安装 npm 依赖：
 
 ```bash
-# 安装依赖
-npm install
-
-# 启动 Expo 开发服务器
 npm start
+# http://localhost:4173
 ```
+
+运行数据迁移与统计测试：
 
 ```bash
-# 启动 PWA 本地服务器
-node pwa-server.js
-# 访问 http://localhost:4173
+npm test
 ```
 
-## 部署
+PWA 由 GitHub Actions 部署到 GitHub Pages。推送 `main` 分支后会自动发布 `pwa/`。
 
-PWA 通过 GitHub Actions 自动部署到 GitHub Pages。推送 `main` 分支即触发。
+## iOS 开发
 
-在线地址：`https://watice555.github.io/reminder/`
+工程要求 iOS 16 或更高版本。使用 Xcode 打开：
+
+```bash
+open ios/CycleReminder.xcodeproj
+```
+
+当前这台 Mac 的 `xcode-select` 仍指向 Command Line Tools。命令行构建时可临时指定完整 Xcode：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+xcodebuild \
+  -project ios/CycleReminder.xcodeproj \
+  -scheme CycleReminder \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  test
+```
+
+也可以自行切换全局开发目录：
+
+```bash
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
+
+### 安装到自己的 iPhone
+
+1. 用数据线或已配对的无线连接把 iPhone 接到 Mac，并在手机上信任这台电脑。
+2. 在 Xcode 的 Settings → Accounts 中登录 Apple ID。
+3. 打开 `CycleReminder` target 的 Signing & Capabilities，选择自己的 Team，并保持 Automatically manage signing 开启。
+4. 如果 Bundle Identifier 与其他项目冲突，把 `com.wuth.cyclereminder` 改成自己唯一的标识。
+5. 在 Xcode 顶部设备列表选择 iPhone，点击 Run。
+6. 如果手机提示开发者模式，在“设置 → 隐私与安全性 → 开发者模式”中开启后重试。
+
+## Web 数据迁移到 iOS
+
+浏览器的 IndexedDB 和 iOS App 沙箱互相隔离，不能自动读取。迁移方式：
+
+1. 在 Web 的任务页选择“导出 JSON”。
+2. 把内容保存为 `.json` 文件，并通过 AirDrop、iCloud Drive 或“文件”App 放到 iPhone。
+3. 在 iOS App 任务页左上角“备份”菜单选择“导入 JSON”。
+4. 确认任务数和完成记录数后替换本机数据。
+
+v2 备份格式为：
+
+```json
+{
+  "schemaVersion": 2,
+  "exportedAt": "2026-07-22T08:00:00.000Z",
+  "tasks": [
+    {
+      "id": "task-id",
+      "name": "换滤芯",
+      "intervalHours": 48,
+      "lastCompletedAt": "2026-07-22T08:00:00.000Z",
+      "nextDueAt": "2026-07-24T08:00:00.000Z",
+      "createdAt": "2026-07-20T08:00:00.000Z",
+      "completions": [
+        {
+          "id": "completion-id",
+          "completedAt": "2026-07-22T08:00:00.000Z",
+          "scheduledDueAt": "2026-07-22T09:00:00.000Z",
+          "intervalHours": 48
+        }
+      ]
+    }
+  ]
+}
+```
+
+Web 和 iOS 都能继续导入旧版的顶层任务数组备份。
+
+## 当前提醒方式
+
+到期状态会在打开 Web 或 iOS App 时醒目显示。当前版本尚未加入系统本地通知或后台推送。

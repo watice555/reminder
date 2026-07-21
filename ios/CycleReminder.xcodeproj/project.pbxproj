@@ -1,0 +1,455 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* CycleReminderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* CycleReminderApp.swift */; };
+		100000000000000000000002 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* Formatting.swift */; };
+		100000000000000000000003 /* ReminderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* ReminderModels.swift */; };
+		100000000000000000000004 /* ReminderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* ReminderStore.swift */; };
+		100000000000000000000005 /* StatisticsCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* StatisticsCalculator.swift */; };
+		100000000000000000000006 /* BackupCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* BackupCodec.swift */; };
+		100000000000000000000007 /* JSONRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* JSONRepository.swift */; };
+		100000000000000000000008 /* BackupDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* BackupDocument.swift */; };
+		100000000000000000000009 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* ContentView.swift */; };
+		10000000000000000000000A /* TaskEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* TaskEditorView.swift */; };
+		10000000000000000000000B /* TaskCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* TaskCardView.swift */; };
+		10000000000000000000000C /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* TaskListView.swift */; };
+		10000000000000000000000D /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* StatisticsView.swift */; };
+		10000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* Assets.xcassets */; };
+		10000000000000000000000F /* CycleReminderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* CycleReminderTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		300000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = CycleReminder;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* CycleReminderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleReminderApp.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* ReminderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderModels.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* ReminderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderStore.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* StatisticsCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsCalculator.swift; sourceTree = "<group>"; };
+		200000000000000000000006 /* BackupCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCodec.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* JSONRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONRepository.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* BackupDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDocument.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		20000000000000000000000A /* TaskEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditorView.swift; sourceTree = "<group>"; };
+		20000000000000000000000B /* TaskCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCardView.swift; sourceTree = "<group>"; };
+		20000000000000000000000C /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
+		20000000000000000000000D /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		20000000000000000000000E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		20000000000000000000000F /* CycleReminderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleReminderTests.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* CycleReminder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CycleReminder.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000011 /* CycleReminderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CycleReminderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		600000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		700000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				700000000000000000000002 /* CycleReminder */,
+				700000000000000000000008 /* CycleReminderTests */,
+				700000000000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		700000000000000000000002 /* CycleReminder */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* CycleReminderApp.swift */,
+				200000000000000000000002 /* Formatting.swift */,
+				700000000000000000000003 /* Models */,
+				700000000000000000000004 /* Store */,
+				700000000000000000000005 /* Statistics */,
+				700000000000000000000006 /* Services */,
+				700000000000000000000007 /* Views */,
+				20000000000000000000000E /* Assets.xcassets */,
+			);
+			path = CycleReminder;
+			sourceTree = "<group>";
+		};
+		700000000000000000000003 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000003 /* ReminderModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		700000000000000000000004 /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000004 /* ReminderStore.swift */,
+			);
+			path = Store;
+			sourceTree = "<group>";
+		};
+		700000000000000000000005 /* Statistics */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000005 /* StatisticsCalculator.swift */,
+			);
+			path = Statistics;
+			sourceTree = "<group>";
+		};
+		700000000000000000000006 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000006 /* BackupCodec.swift */,
+				200000000000000000000007 /* JSONRepository.swift */,
+				200000000000000000000008 /* BackupDocument.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		700000000000000000000007 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000009 /* ContentView.swift */,
+				20000000000000000000000A /* TaskEditorView.swift */,
+				20000000000000000000000B /* TaskCardView.swift */,
+				20000000000000000000000C /* TaskListView.swift */,
+				20000000000000000000000D /* StatisticsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		700000000000000000000008 /* CycleReminderTests */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000F /* CycleReminderTests.swift */,
+			);
+			path = CycleReminderTests;
+			sourceTree = "<group>";
+		};
+		700000000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* CycleReminder.app */,
+				200000000000000000000011 /* CycleReminderTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* CycleReminder */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000002 /* Build configuration list for PBXNativeTarget "CycleReminder" */;
+			buildPhases = (
+				800000000000000000000001 /* Sources */,
+				600000000000000000000001 /* Frameworks */,
+				900000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CycleReminder;
+			productName = CycleReminder;
+			productReference = 200000000000000000000010 /* CycleReminder.app */;
+			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000002 /* CycleReminderTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000003 /* Build configuration list for PBXNativeTarget "CycleReminderTests" */;
+			buildPhases = (
+				800000000000000000000002 /* Sources */,
+				600000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B00000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = CycleReminderTests;
+			productName = CycleReminderTests;
+			productReference = 200000000000000000000011 /* CycleReminderTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		400000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					500000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 500000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = A00000000000000000000001 /* Build configuration list for PBXProject "CycleReminder" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_Hans;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				zh_Hans,
+			);
+			mainGroup = 700000000000000000000001;
+			productRefGroup = 700000000000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* CycleReminder */,
+				500000000000000000000002 /* CycleReminderTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		900000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000E /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		800000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* CycleReminderApp.swift in Sources */,
+				100000000000000000000002 /* Formatting.swift in Sources */,
+				100000000000000000000003 /* ReminderModels.swift in Sources */,
+				100000000000000000000004 /* ReminderStore.swift in Sources */,
+				100000000000000000000005 /* StatisticsCalculator.swift in Sources */,
+				100000000000000000000006 /* BackupCodec.swift in Sources */,
+				100000000000000000000007 /* JSONRepository.swift in Sources */,
+				100000000000000000000008 /* BackupDocument.swift in Sources */,
+				100000000000000000000009 /* ContentView.swift in Sources */,
+				10000000000000000000000A /* TaskEditorView.swift in Sources */,
+				10000000000000000000000B /* TaskCardView.swift in Sources */,
+				10000000000000000000000C /* TaskListView.swift in Sources */,
+				10000000000000000000000D /* StatisticsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		800000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000F /* CycleReminderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B00000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* CycleReminder */;
+			targetProxy = 300000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		C00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "循环提醒";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wuth.cyclereminder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		C00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "循环提醒";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wuth.cyclereminder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		C00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.wuth.cyclereminder.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CycleReminder.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CycleReminder";
+			};
+			name = Debug;
+		};
+		C00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.wuth.cyclereminder.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CycleReminder.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CycleReminder";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000000001 /* Build configuration list for PBXProject "CycleReminder" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000001 /* Debug */,
+				C00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000002 /* Build configuration list for PBXNativeTarget "CycleReminder" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000003 /* Debug */,
+				C00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000003 /* Build configuration list for PBXNativeTarget "CycleReminderTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000005 /* Debug */,
+				C00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 400000000000000000000001 /* Project object */;
+}

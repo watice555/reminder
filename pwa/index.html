@@ -21,17 +21,71 @@
         <button class="primary-button" id="newTaskButton" type="button">新增</button>
       </header>
 
-      <section class="backup-panel" aria-label="备份">
-        <button class="ghost-button" id="exportButton" type="button">导出 JSON</button>
-        <button class="ghost-button" id="importButton" type="button">导入 JSON</button>
-        <button class="ghost-button" id="installButton" type="button" hidden>安装到主屏幕</button>
+      <nav class="view-tabs" aria-label="主要页面" role="tablist">
+        <button class="view-tab is-active" id="taskViewTab" type="button" role="tab" aria-controls="taskView" aria-selected="true">
+          任务
+        </button>
+        <button class="view-tab" id="statisticsViewTab" type="button" role="tab" aria-controls="statisticsView" aria-selected="false">
+          统计
+        </button>
+      </nav>
+
+      <section id="taskView" role="tabpanel" aria-labelledby="taskViewTab">
+        <section class="backup-panel" aria-label="备份">
+          <button class="ghost-button" id="exportButton" type="button">导出 JSON</button>
+          <button class="ghost-button" id="importButton" type="button">导入 JSON</button>
+          <button class="ghost-button" id="installButton" type="button" hidden>安装到主屏幕</button>
+        </section>
+
+        <section class="notice" id="storageNotice" hidden></section>
+
+        <section class="task-list" id="taskList" aria-live="polite"></section>
       </section>
 
-      <section class="notice" id="storageNotice" hidden></section>
+      <section class="statistics-view" id="statisticsView" role="tabpanel" aria-labelledby="statisticsViewTab" hidden>
+        <section class="statistics-summary" aria-labelledby="statisticsTitle">
+          <div class="section-heading">
+            <div>
+              <h2 id="statisticsTitle">完成统计</h2>
+              <p id="statisticsHint"></p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <article class="metric-card">
+              <span>今天</span>
+              <strong id="statisticsToday">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>近 7 天</span>
+              <strong id="statisticsSevenDays">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>累计完成</span>
+              <strong id="statisticsTotal">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>准时率</span>
+              <strong id="statisticsOnTime">—</strong>
+            </article>
+          </div>
+        </section>
 
-      <section class="task-list" id="taskList" aria-live="polite"></section>
+        <section class="statistics-panel" aria-labelledby="trendTitle">
+          <div class="section-heading">
+            <h2 id="trendTitle">最近 7 天</h2>
+          </div>
+          <div class="statistics-chart" id="statisticsChart" role="img" aria-label="最近七天完成次数"></div>
+        </section>
 
-      <p class="app-version">v2026.05.16.4</p>
+        <section class="statistics-panel" aria-labelledby="rankingTitle">
+          <div class="section-heading">
+            <h2 id="rankingTitle">任务排行</h2>
+          </div>
+          <div class="statistics-ranking" id="statisticsRanking"></div>
+        </section>
+      </section>
+
+      <p class="app-version">v2026.07.22.1</p>
     </main>
 
     <dialog class="task-dialog" id="taskDialog">
@@ -98,6 +152,7 @@
         <p class="task-remaining"></p>
         <p class="task-date task-due"></p>
         <p class="task-date task-completed"></p>
+        <p class="task-completion-count"></p>
         <div class="task-progress" aria-label="本轮进度">
           <div class="task-progress__meta">
             <span>本轮进度</span>
@@ -115,6 +170,7 @@
       </article>
     </template>
 
+    <script src="./model.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

@@ -2,13 +2,15 @@ const DB_NAME = 'cycle-reminder-db';
 const DB_VERSION = 1;
 const TASK_STORE = 'tasks';
 const SNAPSHOT_KEY = 'cycle-reminder.snapshot.v1';
-const DEFAULT_INTERVAL_HOURS = 48;
+const { DEFAULT_INTERVAL_HOURS } = ReminderModel;
 
 /** @type {Array<ReminderTask>} */
 let tasks = [];
 let db = null;
 let editingTaskId = null;
 let deferredInstallPrompt = null;
+let activeView = 'tasks';
+const completingTaskIds = new Set();
 
 /**
  * @typedef {Object} ReminderTask
@@ -18,6 +20,15 @@ let deferredInstallPrompt = null;
  * @property {string} lastCompletedAt
  * @property {string} nextDueAt
  * @property {string} createdAt
+ * @property {Array<CompletionRecord>} completions
+ */
+
+/**
+ * @typedef {Object} CompletionRecord
+ * @property {string} id
+ * @property {string} completedAt
+ * @property {string} scheduledDueAt
+ * @property {number} intervalHours
  */
 
 const elements = {
@@ -41,6 +52,17 @@ const elements = {
   dataText: document.querySelector('#dataText'),
   closeDataButton: document.querySelector('#closeDataButton'),
   confirmImportButton: document.querySelector('#confirmImportButton'),
+  taskViewTab: document.querySelector('#taskViewTab'),
+  statisticsViewTab: document.querySelector('#statisticsViewTab'),
+  taskView: document.querySelector('#taskView'),
+  statisticsView: document.querySelector('#statisticsView'),
+  statisticsToday: document.querySelector('#statisticsToday'),
+  statisticsSevenDays: document.querySelector('#statisticsSevenDays'),
+  statisticsTotal: document.querySelector('#statisticsTotal'),
+  statisticsOnTime: document.querySelector('#statisticsOnTime'),
+  statisticsHint: document.querySelector('#statisticsHint'),
+  statisticsChart: document.querySelector('#statisticsChart'),
+  statisticsRanking: document.querySelector('#statisticsRanking'),
 };
 
 init();
@@ -64,6 +86,8 @@ function bindEvents() {
   elements.closeDataButton.addEventListener('click', closeDataDialog);
   elements.confirmImportButton.addEventListener('click', handleImport);
   elements.installButton.addEventListener('click', handleInstall);
+  elements.taskViewTab.addEventListener('click', () => switchView('tasks'));
+  elements.statisticsViewTab.addEventListener('click', () => switchView('statistics'));
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
@@ -161,15 +185,16 @@ async function loadTasks() {
     try {
       const storedTasks = await getAllTasksFromDb();
       if (storedTasks.length) {
-        writeSnapshot(storedTasks);
-        return storedTasks.filter(isValidTask);
+        const normalizedTasks = ReminderModel.normalizeTasks(storedTasks);
+        writeSnapshot(normalizedTasks);
+        return normalizedTasks;
       }
     } catch {
       showStorageNotice('IndexedDB 读取失败，正在尝试从本地快照恢复。');
     }
   }
 
-  return readSnapshot().filter(isValidTask);
+  return ReminderModel.normalizeTasks(readSnapshot());
 }
 
 function getAllTasksFromDb() {
@@ -259,6 +284,7 @@ async function handleTaskSubmit(event) {
         lastCompletedAt: completedAt.toISOString(),
         nextDueAt: addHours(completedAt, intervalHours).toISOString(),
         createdAt: completedAt.toISOString(),
+        completions: [],
       },
       ...tasks,
     ];
@@ -270,24 +296,36 @@ async function handleTaskSubmit(event) {
 }
 
 async function completeTask(taskId) {
-  const completedAt = new Date();
-  tasks = tasks.map((task) =>
-    task.id === taskId
-      ? {
-          ...task,
-          lastCompletedAt: completedAt.toISOString(),
-          nextDueAt: addHours(completedAt, task.intervalHours).toISOString(),
-        }
-      : task,
-  );
+  if (completingTaskIds.has(taskId)) {
+    return;
+  }
 
-  await persistTasks(tasks);
+  completingTaskIds.add(taskId);
+  const completedAt = new Date();
+  tasks = tasks.map((task) => {
+    if (task.id !== taskId) {
+      return task;
+    }
+
+    return ReminderModel.completeTask(task, completedAt) || task;
+  });
+
   render();
+  try {
+    await persistTasks(tasks);
+  } finally {
+    completingTaskIds.delete(taskId);
+    render();
+  }
 }
 
 async function deleteTask(taskId) {
   const task = tasks.find((item) => item.id === taskId);
-  if (!confirm(`确定删除“${task?.name || '这个任务'}”吗？`)) {
+  const completionCount = task?.completions?.length || 0;
+  const historyNotice = completionCount
+    ? `，并删除它的 ${completionCount} 条完成记录`
+    : '';
+  if (!confirm(`确定删除“${task?.name || '这个任务'}”${historyNotice}吗？`)) {
     return;
   }
 
@@ -314,7 +352,7 @@ function closeTaskDialog() {
 
 function openExportDialog() {
   elements.dataDialogTitle.textContent = '导出 JSON';
-  elements.dataText.value = JSON.stringify(tasks, null, 2);
+  elements.dataText.value = JSON.stringify(ReminderModel.createBackup(tasks), null, 2);
   elements.dataText.readOnly = true;
   elements.confirmImportButton.hidden = true;
   elements.dataDialog.showModal();
@@ -338,23 +376,21 @@ function closeDataDialog() {
 
 async function handleImport() {
   try {
-    const parsed = JSON.parse(elements.dataText.value);
-    if (!Array.isArray(parsed)) {
-      alert('JSON 顶层必须是任务数组。');
+    const backup = ReminderModel.parseBackup(elements.dataText.value);
+    if (
+      !confirm(
+        `将用 ${backup.tasks.length} 个任务和 ${backup.completionCount} 条完成记录替换当前数据，确定继续吗？`,
+      )
+    ) {
       return;
     }
 
-    const importedTasks = parsed.map(normalizeImportedTask).filter(Boolean);
-    if (!confirm(`将用 ${importedTasks.length} 个导入任务替换当前任务，确定继续吗？`)) {
-      return;
-    }
-
-    tasks = importedTasks;
+    tasks = backup.tasks;
     await persistTasks(tasks);
     closeDataDialog();
     render();
-  } catch {
-    alert('请输入有效的 JSON。');
+  } catch (error) {
+    alert(error instanceof Error ? error.message : '请输入有效的 JSON。');
   }
 }
 
@@ -371,11 +407,30 @@ async function handleInstall() {
 
 function render() {
   const now = Date.now();
+  renderHeader();
+  renderTaskList(now);
+  renderStatistics(now);
+}
+
+function renderHeader() {
+  const isTaskView = activeView === 'tasks';
+  elements.summary.textContent = isTaskView
+    ? `${tasks.length} 个任务保存在本机`
+    : '完成记录保存在每个任务中';
+  elements.newTaskButton.hidden = !isTaskView;
+  elements.taskView.hidden = !isTaskView;
+  elements.statisticsView.hidden = isTaskView;
+  elements.taskViewTab.classList.toggle('is-active', isTaskView);
+  elements.statisticsViewTab.classList.toggle('is-active', !isTaskView);
+  elements.taskViewTab.setAttribute('aria-selected', String(isTaskView));
+  elements.statisticsViewTab.setAttribute('aria-selected', String(!isTaskView));
+}
+
+function renderTaskList(now) {
   const sortedTasks = [...tasks].sort(
     (a, b) => new Date(a.nextDueAt).getTime() - new Date(b.nextDueAt).getTime(),
   );
 
-  elements.summary.textContent = `${tasks.length} 个任务保存在本机`;
   elements.taskList.textContent = '';
 
   if (!sortedTasks.length) {
@@ -404,15 +459,91 @@ function render() {
       : `剩余 ${formatDuration(remainingMs)}`;
     card.querySelector('.task-due').textContent = `下次到期：${formatDateTime(task.nextDueAt)}`;
     card.querySelector('.task-completed').textContent = `上次完成：${formatDateTime(task.lastCompletedAt)}`;
+    card.querySelector('.task-completion-count').textContent = `累计完成 ${task.completions.length} 次`;
     card.querySelector('.task-progress').setAttribute('aria-label', `当前循环已过去 ${progressPercent}%`);
     card.querySelector('.task-progress__value').textContent = `已过去 ${progressPercent}%`;
     card.querySelector('.task-progress__fill').style.width = `${progressPercent}%`;
-    card.querySelector('.done-button').addEventListener('click', () => completeTask(task.id));
+    const doneButton = card.querySelector('.done-button');
+    const isCompleting = completingTaskIds.has(task.id);
+    doneButton.disabled = isCompleting;
+    doneButton.textContent = isCompleting ? '正在保存…' : '完成并重置';
+    doneButton.addEventListener('click', () => completeTask(task.id));
     card.querySelector('.edit-button').addEventListener('click', () => openTaskDialog(task));
     card.querySelector('.delete-button').addEventListener('click', () => deleteTask(task.id));
 
     elements.taskList.append(card);
   });
+}
+
+function renderStatistics(now) {
+  const statistics = ReminderModel.calculateStatistics(tasks, now);
+  elements.statisticsToday.textContent = String(statistics.today);
+  elements.statisticsSevenDays.textContent = String(statistics.lastSevenDays);
+  elements.statisticsTotal.textContent = String(statistics.total);
+  elements.statisticsOnTime.textContent =
+    statistics.onTimeRate === null ? '—' : `${Math.round(statistics.onTimeRate * 100)}%`;
+  elements.statisticsHint.textContent = statistics.total
+    ? `共记录 ${statistics.total} 次完成，准时 ${statistics.onTimeCount} 次。`
+    : '统计从本次升级后开始；旧任务的当前周期会保留，但不会伪造历史完成次数。';
+
+  const maxDailyCount = Math.max(1, ...statistics.daily.map((item) => item.count));
+  elements.statisticsChart.textContent = '';
+  statistics.daily.forEach((item) => {
+    const column = document.createElement('div');
+    column.className = 'chart-column';
+    column.setAttribute('aria-label', `${item.label} 完成 ${item.count} 次`);
+
+    const count = document.createElement('strong');
+    count.textContent = String(item.count);
+    const track = document.createElement('div');
+    track.className = 'chart-track';
+    const bar = document.createElement('div');
+    bar.className = 'chart-bar';
+    bar.style.height = `${Math.max(item.count ? 10 : 2, (item.count / maxDailyCount) * 100)}%`;
+    const label = document.createElement('span');
+    label.textContent = item.label;
+
+    track.append(bar);
+    column.append(count, track, label);
+    elements.statisticsChart.append(column);
+  });
+
+  elements.statisticsRanking.textContent = '';
+  if (!statistics.taskRanking.length) {
+    const empty = document.createElement('p');
+    empty.className = 'statistics-empty';
+    empty.textContent = '完成一次任务后，这里会显示任务排行。';
+    elements.statisticsRanking.append(empty);
+    return;
+  }
+
+  statistics.taskRanking.forEach((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'ranking-row';
+    const main = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = `${index + 1}. ${item.name}`;
+    const detail = document.createElement('span');
+    detail.textContent = item.latestCompletedAt
+      ? `最近完成 ${formatDateTime(item.latestCompletedAt)}`
+      : '暂无完成记录';
+    const result = document.createElement('div');
+    result.className = 'ranking-result';
+    const total = document.createElement('strong');
+    total.textContent = `${item.total} 次`;
+    const rate = document.createElement('span');
+    rate.textContent = item.onTimeRate === null ? '暂无准时率' : `准时 ${Math.round(item.onTimeRate * 100)}%`;
+
+    main.append(name, detail);
+    result.append(total, rate);
+    row.append(main, result);
+    elements.statisticsRanking.append(row);
+  });
+}
+
+function switchView(view) {
+  activeView = view === 'statistics' ? 'statistics' : 'tasks';
+  render();
 }
 
 function addHours(date, hours) {
@@ -452,7 +583,7 @@ function setIntervalInputs(intervalHours) {
 }
 
 function createId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return ReminderModel.createId();
 }
 
 function formatDuration(ms) {
@@ -515,42 +646,6 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
-}
-
-function isValidTask(value) {
-  return (
-    value &&
-    typeof value === 'object' &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.intervalHours === 'number' &&
-    typeof value.lastCompletedAt === 'string' &&
-    typeof value.nextDueAt === 'string'
-  );
-}
-
-function normalizeImportedTask(value) {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const intervalHours = Number(value.intervalHours);
-  const lastCompletedAt = value.lastCompletedAt || new Date().toISOString();
-  const nextDueAt =
-    value.nextDueAt || addHours(new Date(lastCompletedAt), intervalHours || DEFAULT_INTERVAL_HOURS).toISOString();
-
-  if (!value.name || !Number.isFinite(intervalHours) || intervalHours <= 0) {
-    return null;
-  }
-
-  return {
-    id: value.id || createId(),
-    name: String(value.name),
-    intervalHours,
-    lastCompletedAt,
-    nextDueAt,
-    createdAt: value.createdAt || new Date().toISOString(),
-  };
 }
 
 function showStorageNotice(message) {
