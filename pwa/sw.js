@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cycle-reminder-pwa-v5';
+const CACHE_NAME = 'cycle-reminder-pwa-v6';
 const APP_ASSETS = [
   './',
   './index.html',

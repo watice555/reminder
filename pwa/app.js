@@ -81,7 +81,7 @@ function bindEvents() {
   elements.newTaskButton.addEventListener('click', () => openTaskDialog());
   elements.cancelTaskButton.addEventListener('click', closeTaskDialog);
   elements.taskForm.addEventListener('submit', handleTaskSubmit);
-  elements.exportButton.addEventListener('click', openExportDialog);
+  elements.exportButton.addEventListener('click', downloadBackupFile);
   elements.importButton.addEventListener('click', openImportDialog);
   elements.closeDataButton.addEventListener('click', closeDataDialog);
   elements.confirmImportButton.addEventListener('click', handleImport);
@@ -350,9 +350,29 @@ function closeTaskDialog() {
   elements.taskDialog.close();
 }
 
-function openExportDialog() {
+function downloadBackupFile() {
+  const json = JSON.stringify(ReminderModel.createBackup(tasks), null, 2);
+
+  try {
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z');
+
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `cycle-reminder-backup-${timestamp}.json`;
+    document.body.append(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1_000);
+  } catch {
+    openExportDialog(json);
+  }
+}
+
+function openExportDialog(json) {
   elements.dataDialogTitle.textContent = '导出 JSON';
-  elements.dataText.value = JSON.stringify(ReminderModel.createBackup(tasks), null, 2);
+  elements.dataText.value = json;
   elements.dataText.readOnly = true;
   elements.confirmImportButton.hidden = true;
   elements.dataDialog.showModal();

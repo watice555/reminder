@@ -80,8 +80,8 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
 浏览器的 IndexedDB 和 iOS App 沙箱互相隔离，不能自动读取。迁移方式：
 
-1. 在 Web 的任务页选择“导出 JSON”。
-2. 把内容保存为 `.json` 文件，并通过 AirDrop、iCloud Drive 或“文件”App 放到 iPhone。
+1. 在 Web 的任务页选择“导出 JSON”，浏览器会直接下载带时间戳的 `.json` 文件。
+2. 通过 AirDrop、iCloud Drive 或“文件”App 把下载的文件放到 iPhone。
 3. 在 iOS App 任务页左上角“备份”菜单选择“导入 JSON”。
 4. 确认任务数和完成记录数后替换本机数据。
 
