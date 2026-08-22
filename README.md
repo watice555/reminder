@@ -76,6 +76,18 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 5. 在 Xcode 顶部设备列表选择 iPhone，点击 Run。
 6. 如果手机提示开发者模式，在“设置 → 隐私与安全性 → 开发者模式”中开启后重试。
 
+### 一键续期
+
+免费 Apple ID 的 Personal Team 签名每 7 天到期。首次按上面的步骤完成 Xcode 登录和签名设置后，以后可以：
+
+1. 连接并解锁 iPhone。
+2. 双击项目根目录的 **续期.command**。
+3. 等待脚本自动重新签名、覆盖安装并启动 App。
+
+不要先从 iPhone 删除 App。脚本会使用原 Bundle Identifier 覆盖安装，以保留现有数据。
+
+如果脚本提示无法连接 Apple 开发者服务，请让 `developer.apple.com` 和 `idmsa.apple.com` 在 VPN/代理中直连，或在续期时临时关闭 VPN/代理。
+
 ## Web 数据迁移到 iOS
 
 浏览器的 IndexedDB 和 iOS App 沙箱互相隔离，不能自动读取。迁移方式：
