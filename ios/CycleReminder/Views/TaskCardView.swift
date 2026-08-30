@@ -3,6 +3,7 @@ import SwiftUI
 struct TaskCardView: View {
     let task: ReminderTask
     let onComplete: () -> Void
+    let onBackfill: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -78,6 +79,13 @@ struct TaskCardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppPalette.green)
+                .contextMenu {
+                    Button(action: onBackfill) {
+                        Label("补记完成", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                .accessibilityHint("长按可补记完成")
+                .accessibilityAction(named: Text("补记完成"), onBackfill)
 
                 Button("编辑", action: onEdit)
                     .buttonStyle(.bordered)

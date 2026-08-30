@@ -1,5 +1,13 @@
 # 实施记录
 
+## 自定义完成时间与补记完成
+
+- 阶段总结：Web/PWA 与 iOS 新建任务时均可在折叠的高级设置中指定上次完成时间，以校准首次到期且不计入完成统计；任务卡片保留短按一键完成，并通过长按提供带时间范围校验的补记完成，两个例外流程都会在写入前再次确认。补记继续保存原计划到期时间和周期快照、重排 iOS 系统提醒；JSON schema 保持 v3 兼容。
+- 已执行的验证：`node --check pwa/app.js` 与 `node --check pwa/model.js` 通过；`npm test` 通过 12 项 Web 测试；`xcodebuild -quiet -project ios/CycleReminder.xcodeproj -scheme CycleReminder -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' test` 通过 13 项 iOS 测试和完整构建；`git diff --check` 通过。使用本地浏览器验证高级设置默认折叠、自定义创建及补记的二次确认取消不写入、右键进入补记不误触普通完成、短按仅完成一次且控制台无错误；使用 iPhone 17 Pro 模拟器验证完成按钮的补记辅助动作、补记日期范围页面和普通短按重置。
+- 时间戳：2026-08-30 18:24:28 Asia/Shanghai
+- 写入者模型：未知（运行环境未暴露）
+- 设备：TianhaodeMacBook-Pro（macOS 26.6.2，arm64）
+
 ## 忽略本地 Agent 元数据
 
 - 阶段总结：将项目根目录下的 `.zcode/` 加入 Git 忽略规则，避免本地 Agent 计划与元数据进入工作区状态或后续提交。

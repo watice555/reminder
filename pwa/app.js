@@ -8,9 +8,11 @@ const { DEFAULT_INTERVAL_HOURS } = ReminderModel;
 let tasks = [];
 let db = null;
 let editingTaskId = null;
+let backfillingTaskId = null;
 let deferredInstallPrompt = null;
 let activeView = 'tasks';
 const completingTaskIds = new Set();
+const LONG_PRESS_DURATION_MS = 600;
 
 /**
  * @typedef {Object} ReminderTask
@@ -55,7 +57,17 @@ const elements = {
   taskNameInput: document.querySelector('#taskNameInput'),
   intervalDaysInput: document.querySelector('#intervalDaysInput'),
   intervalHoursInput: document.querySelector('#intervalHoursInput'),
+  taskAdvancedSettings: document.querySelector('#taskAdvancedSettings'),
+  customInitialCompletionToggle: document.querySelector('#customInitialCompletionToggle'),
+  customInitialCompletionFields: document.querySelector('#customInitialCompletionFields'),
+  initialCompletedAtInput: document.querySelector('#initialCompletedAtInput'),
   cancelTaskButton: document.querySelector('#cancelTaskButton'),
+  completionDialog: document.querySelector('#completionDialog'),
+  completionForm: document.querySelector('#completionForm'),
+  completionTaskName: document.querySelector('#completionTaskName'),
+  completionTimeInput: document.querySelector('#completionTimeInput'),
+  completionRangeHint: document.querySelector('#completionRangeHint'),
+  cancelCompletionButton: document.querySelector('#cancelCompletionButton'),
   dataDialog: document.querySelector('#dataDialog'),
   dataDialogTitle: document.querySelector('#dataDialogTitle'),
   dataText: document.querySelector('#dataText'),
@@ -90,6 +102,12 @@ function bindEvents() {
   elements.newTaskButton.addEventListener('click', () => openTaskDialog());
   elements.cancelTaskButton.addEventListener('click', closeTaskDialog);
   elements.taskForm.addEventListener('submit', handleTaskSubmit);
+  elements.customInitialCompletionToggle.addEventListener('change', updateCustomCompletionFields);
+  elements.completionForm.addEventListener('submit', handleBackfillSubmit);
+  elements.cancelCompletionButton.addEventListener('click', closeCompletionDialog);
+  elements.completionDialog.addEventListener('close', () => {
+    backfillingTaskId = null;
+  });
   elements.exportButton.addEventListener('click', downloadBackupFile);
   elements.importButton.addEventListener('click', openImportDialog);
   elements.closeDataButton.addEventListener('click', closeDataDialog);
@@ -284,19 +302,45 @@ async function handleTaskSubmit(event) {
       };
     });
   } else {
-    const completedAt = new Date();
-    tasks = [
+    const createdAt = new Date();
+    const usesCustomCompletion = elements.customInitialCompletionToggle.checked;
+    const customCompletedAt = usesCustomCompletion
+      ? new Date(elements.initialCompletedAtInput.value)
+      : null;
+    if (
+      usesCustomCompletion &&
+      (Number.isNaN(customCompletedAt.getTime()) || customCompletedAt.getTime() > createdAt.getTime())
+    ) {
+      alert('自定义上次完成时间必须有效，且不能晚于当前时间。');
+      return;
+    }
+
+    const task = ReminderModel.createTask(
       {
-        id: createId(),
         name,
         intervalHours,
-        lastCompletedAt: completedAt.toISOString(),
-        nextDueAt: addHours(completedAt, intervalHours).toISOString(),
-        createdAt: completedAt.toISOString(),
-        completions: [],
+        lastCompletedAt: customCompletedAt,
       },
-      ...tasks,
-    ];
+      createdAt,
+    );
+    if (!task) {
+      alert('无法创建任务，请检查名称、循环时间和上次完成时间。');
+      return;
+    }
+
+    if (
+      usesCustomCompletion &&
+      !confirm(
+        `确认创建“${name}”吗？\n\n` +
+          `上次完成：${formatFullDateTime(task.lastCompletedAt)}\n` +
+          `下次到期：${formatFullDateTime(task.nextDueAt)}\n\n` +
+          '这个时间只用于确定当前周期，不会计入完成统计。',
+      )
+    ) {
+      return;
+    }
+
+    tasks = [task, ...tasks];
   }
 
   await persistTasks(tasks);
@@ -328,6 +372,45 @@ async function completeTask(taskId) {
   }
 }
 
+async function handleBackfillSubmit(event) {
+  event.preventDefault();
+
+  const task = tasks.find((item) => item.id === backfillingTaskId);
+  const completedAt = new Date(elements.completionTimeInput.value);
+  const now = new Date();
+  const updatedTask = task ? ReminderModel.backfillTask(task, completedAt, now) : null;
+  if (!updatedTask) {
+    alert('补记时间必须晚于上次完成时间，且不能晚于当前时间。');
+    return;
+  }
+
+  if (
+    !confirm(
+      `确认补记“${task.name}”吗？\n\n` +
+        `完成时间：${formatFullDateTime(updatedTask.lastCompletedAt)}\n` +
+        `下次到期：${formatFullDateTime(updatedTask.nextDueAt)}\n\n` +
+        '确认后将新增 1 条完成记录，并按这个时间开始新的循环。',
+    )
+  ) {
+    return;
+  }
+
+  const taskId = task.id;
+  if (completingTaskIds.has(taskId)) {
+    return;
+  }
+  completingTaskIds.add(taskId);
+  tasks = tasks.map((item) => (item.id === taskId ? updatedTask : item));
+  closeCompletionDialog();
+  render();
+  try {
+    await persistTasks(tasks);
+  } finally {
+    completingTaskIds.delete(taskId);
+    render();
+  }
+}
+
 async function deleteTask(taskId) {
   const task = tasks.find((item) => item.id === taskId);
   const completionCount = task?.completions?.length || 0;
@@ -348,6 +431,12 @@ function openTaskDialog(task = null) {
   elements.taskDialogTitle.textContent = task ? '编辑任务' : '新增任务';
   elements.taskNameInput.value = task?.name || '';
   setIntervalInputs(task?.intervalHours || DEFAULT_INTERVAL_HOURS);
+  elements.taskAdvancedSettings.hidden = Boolean(task);
+  elements.taskAdvancedSettings.open = false;
+  elements.customInitialCompletionToggle.checked = false;
+  elements.initialCompletedAtInput.value = toDateTimeLocalValue(floorToMinute(new Date()));
+  elements.initialCompletedAtInput.max = elements.initialCompletedAtInput.value;
+  updateCustomCompletionFields();
   elements.taskDialog.showModal();
   setTimeout(() => elements.taskNameInput.focus(), 50);
 }
@@ -356,7 +445,50 @@ function closeTaskDialog() {
   editingTaskId = null;
   elements.taskForm.reset();
   setIntervalInputs(DEFAULT_INTERVAL_HOURS);
+  elements.taskAdvancedSettings.hidden = false;
+  elements.taskAdvancedSettings.open = false;
+  updateCustomCompletionFields();
   elements.taskDialog.close();
+}
+
+function updateCustomCompletionFields() {
+  elements.customInitialCompletionFields.hidden = !elements.customInitialCompletionToggle.checked;
+  elements.initialCompletedAtInput.required = elements.customInitialCompletionToggle.checked;
+}
+
+function openCompletionDialog(taskId) {
+  if (elements.completionDialog.open) {
+    return;
+  }
+
+  const task = tasks.find((item) => item.id === taskId);
+  const lastCompletedAt = task ? new Date(task.lastCompletedAt) : null;
+  const latest = floorToMinute(new Date());
+  const earliest = lastCompletedAt && !Number.isNaN(lastCompletedAt.getTime())
+    ? ceilToMinute(new Date(lastCompletedAt.getTime() + 1))
+    : null;
+  if (!task || !earliest || earliest.getTime() > latest.getTime()) {
+    alert('当前周期还没有可补记的分钟。');
+    return;
+  }
+
+  backfillingTaskId = task.id;
+  elements.completionTaskName.textContent = `为“${task.name}”补记实际完成时间。`;
+  elements.completionTimeInput.min = toDateTimeLocalValue(earliest);
+  elements.completionTimeInput.max = toDateTimeLocalValue(latest);
+  elements.completionTimeInput.value = elements.completionTimeInput.max;
+  elements.completionRangeHint.textContent =
+    `可选择 ${formatFullDateTime(earliest)} 至 ${formatFullDateTime(latest)}。`;
+  elements.completionDialog.showModal();
+  setTimeout(() => elements.completionTimeInput.focus(), 50);
+}
+
+function closeCompletionDialog() {
+  backfillingTaskId = null;
+  elements.completionForm.reset();
+  if (elements.completionDialog.open) {
+    elements.completionDialog.close();
+  }
 }
 
 function downloadBackupFile() {
@@ -496,11 +628,66 @@ function renderTaskList(now) {
     const isCompleting = completingTaskIds.has(task.id);
     doneButton.disabled = isCompleting;
     doneButton.textContent = isCompleting ? '正在保存…' : '完成并重置';
-    doneButton.addEventListener('click', () => completeTask(task.id));
+    bindCompletionButton(doneButton, task.id);
     card.querySelector('.edit-button').addEventListener('click', () => openTaskDialog(task));
     card.querySelector('.delete-button').addEventListener('click', () => deleteTask(task.id));
 
     elements.taskList.append(card);
+  });
+}
+
+function bindCompletionButton(button, taskId) {
+  let longPressTimer = null;
+  let suppressClickUntil = 0;
+
+  const cancelLongPress = () => {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  const openFromLongPress = () => {
+    cancelLongPress();
+    suppressClickUntil = performance.now() + 1_000;
+    openCompletionDialog(taskId);
+  };
+
+  button.setAttribute('aria-label', '完成并重置；长按可补记完成');
+  button.title = '短按完成，长按补记完成';
+  button.addEventListener('pointerdown', (event) => {
+    if (button.disabled || (event.pointerType === 'mouse' && event.button !== 0)) {
+      return;
+    }
+    cancelLongPress();
+    longPressTimer = setTimeout(openFromLongPress, LONG_PRESS_DURATION_MS);
+  });
+  button.addEventListener('pointerup', cancelLongPress);
+  button.addEventListener('pointercancel', cancelLongPress);
+  button.addEventListener('pointerleave', cancelLongPress);
+  button.addEventListener('click', (event) => {
+    if (performance.now() <= suppressClickUntil) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    completeTask(taskId);
+  });
+  button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    if (button.disabled) {
+      return;
+    }
+    if (performance.now() > suppressClickUntil) {
+      suppressClickUntil = performance.now() + 1_000;
+      openCompletionDialog(taskId);
+    }
+  });
+  button.addEventListener('keydown', (event) => {
+    if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+      event.preventDefault();
+      openCompletionDialog(taskId);
+    }
   });
 }
 
@@ -611,8 +798,18 @@ function setIntervalInputs(intervalHours) {
   elements.intervalHoursInput.value = hours ? formatNumber(hours) : '';
 }
 
-function createId() {
-  return ReminderModel.createId();
+function floorToMinute(date) {
+  return new Date(Math.floor(date.getTime() / 60_000) * 60_000);
+}
+
+function ceilToMinute(date) {
+  return new Date(Math.ceil(date.getTime() / 60_000) * 60_000);
+}
+
+function toDateTimeLocalValue(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function formatDuration(ms) {
@@ -670,6 +867,21 @@ function formatDateTime(value) {
   }
 
   return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatFullDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '时间无效';
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

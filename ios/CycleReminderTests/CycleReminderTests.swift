@@ -36,6 +36,83 @@ final class CycleReminderTests: XCTestCase {
         XCTAssertEqual(task.nextDueAt, "2026-07-24T03:30:00.000Z")
     }
 
+    func testCreatingTaskCanUsePastCompletionAsUncountedCycleAnchor() throws {
+        let now = try XCTUnwrap(ISODate.parse("2026-08-30T10:00:00.000Z"))
+        let completedAt = try XCTUnwrap(ISODate.parse("2026-08-10T10:00:00.000Z"))
+
+        let task = ReminderTask.create(
+            name: "30 天循环",
+            intervalHours: 30 * 24,
+            lastCompletedAt: completedAt,
+            now: now
+        )
+
+        XCTAssertEqual(task.createdAt, "2026-08-30T10:00:00.000Z")
+        XCTAssertEqual(task.lastCompletedAt, "2026-08-10T10:00:00.000Z")
+        XCTAssertEqual(task.nextDueAt, "2026-09-09T10:00:00.000Z")
+        XCTAssertEqual(task.completions, [])
+        XCTAssertEqual(StatisticsCalculator.calculate(tasks: [task], now: now).total, 0)
+    }
+
+    func testDefaultCreationStillUsesCreationTimeAsCycleAnchor() throws {
+        let now = try XCTUnwrap(ISODate.parse("2026-08-30T10:00:00.000Z"))
+        let task = ReminderTask.create(name: "默认任务", intervalHours: 48, now: now)
+
+        XCTAssertEqual(task.lastCompletedAt, "2026-08-30T10:00:00.000Z")
+        XCTAssertEqual(task.nextDueAt, "2026-09-01T10:00:00.000Z")
+        XCTAssertEqual(task.completions, [])
+    }
+
+    func testBackfillUsesSelectedTimeAndSnapshotsPreviousDueDate() throws {
+        var task = legacyTask()
+        let now = try XCTUnwrap(ISODate.parse("2026-07-22T10:00:00.000Z"))
+        let completedAt = try XCTUnwrap(ISODate.parse("2026-07-22T07:00:00.000Z"))
+
+        XCTAssertTrue(task.backfill(at: completedAt, now: now))
+        XCTAssertEqual(task.completions.count, 1)
+        XCTAssertEqual(task.completions[0].completedAt, "2026-07-22T07:00:00.000Z")
+        XCTAssertEqual(task.completions[0].scheduledDueAt, "2026-07-22T04:00:00.000Z")
+        XCTAssertEqual(task.nextDueAt, "2026-07-24T07:00:00.000Z")
+    }
+
+    func testBackfillRejectsOutOfRangeDatesWithoutMutation() throws {
+        let original = legacyTask()
+        let now = try XCTUnwrap(ISODate.parse("2026-07-22T10:00:00.000Z"))
+        let invalidDates = [
+            "2026-07-20T04:00:00.000Z",
+            "2026-07-20T03:59:00.000Z",
+            "2026-07-22T10:01:00.000Z",
+        ]
+
+        for value in invalidDates {
+            var task = original
+            let date = try XCTUnwrap(ISODate.parse(value))
+            XCTAssertFalse(task.backfill(at: date, now: now))
+            XCTAssertEqual(task, original)
+        }
+    }
+
+    func testCustomAnchorAndBackfillSurviveBackupAndRescheduleDueReminder() throws {
+        let now = try XCTUnwrap(ISODate.parse("2026-08-30T10:00:00.000Z"))
+        let initialCompletion = try XCTUnwrap(ISODate.parse("2026-08-10T10:00:00.000Z"))
+        let backfillDate = try XCTUnwrap(ISODate.parse("2026-08-20T10:00:00.000Z"))
+        var task = ReminderTask.create(
+            name: "换滤芯",
+            intervalHours: 30 * 24,
+            reminders: [ReminderRule(id: "due", mode: .due)],
+            lastCompletedAt: initialCompletion,
+            now: now
+        )
+        XCTAssertTrue(task.backfill(at: backfillDate, now: now))
+
+        let restored = try BackupCodec.decode(BackupCodec.encode([task], exportedAt: now))
+        let plan = try XCTUnwrap(NotificationScheduler.plans(for: restored, now: now).first)
+
+        XCTAssertEqual(restored, [task])
+        XCTAssertEqual(plan.fireDate, task.nextDueDate)
+        XCTAssertEqual(plan.fireDate, try XCTUnwrap(ISODate.parse("2026-09-19T10:00:00.000Z")))
+    }
+
     func testBackupRoundTripPreservesCompletions() throws {
         let completion = CompletionRecord(
             id: "completion-1",

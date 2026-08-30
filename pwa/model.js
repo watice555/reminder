@@ -167,6 +167,46 @@
       });
   }
 
+  function createTask(value, createdAt = new Date()) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+
+    const name = typeof value.name === 'string' ? value.name.trim() : String(value.name || '').trim();
+    const intervalHours = Number(value.intervalHours);
+    const createdTimestamp = toTimestamp(createdAt);
+    const customCompletedTimestamp = toTimestamp(value.lastCompletedAt);
+    if (
+      !name ||
+      !Number.isFinite(intervalHours) ||
+      intervalHours <= 0 ||
+      createdTimestamp === null ||
+      (value.lastCompletedAt !== null &&
+        value.lastCompletedAt !== undefined &&
+        value.lastCompletedAt !== '' &&
+        (customCompletedTimestamp === null || customCompletedTimestamp > createdTimestamp))
+    ) {
+      return null;
+    }
+
+    const completedTimestamp = customCompletedTimestamp ?? createdTimestamp;
+    return normalizeTask(
+      {
+        id: typeof value.id === 'string' && value.id ? value.id : createId(createdTimestamp),
+        name,
+        intervalHours,
+        lastCompletedAt: new Date(completedTimestamp).toISOString(),
+        nextDueAt: new Date(
+          completedTimestamp + intervalHours * 60 * 60 * 1000,
+        ).toISOString(),
+        createdAt: new Date(createdTimestamp).toISOString(),
+        completions: [],
+        reminders: value.reminders,
+      },
+      new Date(createdTimestamp),
+    );
+  }
+
   function completeTask(task, completedAt = new Date()) {
     const normalized = normalizeTask(task, completedAt);
     if (!normalized) {
@@ -192,6 +232,25 @@
       ).toISOString(),
       completions: [...normalized.completions, completion],
     };
+  }
+
+  function backfillTask(task, completedAt, now = new Date()) {
+    const normalized = normalizeTask(task, now);
+    const completedTimestamp = toTimestamp(completedAt);
+    const nowTimestamp = toTimestamp(now);
+    const lastCompletedTimestamp = normalized ? toTimestamp(normalized.lastCompletedAt) : null;
+    if (
+      !normalized ||
+      completedTimestamp === null ||
+      nowTimestamp === null ||
+      lastCompletedTimestamp === null ||
+      completedTimestamp <= lastCompletedTimestamp ||
+      completedTimestamp > nowTimestamp
+    ) {
+      return null;
+    }
+
+    return completeTask(normalized, new Date(completedTimestamp));
   }
 
   function createBackup(tasks, exportedAt = new Date()) {
@@ -309,10 +368,12 @@
     BACKUP_SCHEMA_VERSION,
     DEFAULT_INTERVAL_HOURS,
     DAY_MS,
+    backfillTask,
     calculateStatistics,
     completeTask,
     createBackup,
     createId,
+    createTask,
     getTaskStatistics,
     localDateKey,
     normalizeCompletion,

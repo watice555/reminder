@@ -43,6 +43,12 @@ enum ISODate {
     }
 }
 
+enum ReminderDate {
+    static func floorToMinute(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 60) * 60)
+    }
+}
+
 struct CompletionRecord: Codable, Identifiable, Equatable {
     var id: String
     var completedAt: String
@@ -214,16 +220,19 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         name: String,
         intervalHours: Double,
         reminders: [ReminderRule] = [],
+        lastCompletedAt: Date? = nil,
         now: Date = Date()
     ) -> ReminderTask {
-        let timestamp = ISODate.string(from: now)
+        let completedDate = lastCompletedAt ?? now
         return ReminderTask(
             id: UUID().uuidString,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             intervalHours: intervalHours,
-            lastCompletedAt: timestamp,
-            nextDueAt: ISODate.string(from: now.addingTimeInterval(intervalHours * 3_600)),
-            createdAt: timestamp,
+            lastCompletedAt: ISODate.string(from: completedDate),
+            nextDueAt: ISODate.string(
+                from: completedDate.addingTimeInterval(intervalHours * 3_600)
+            ),
+            createdAt: ISODate.string(from: now),
             reminders: reminders.compactMap { $0.normalized(intervalHours: intervalHours) }
         )
     }
@@ -246,6 +255,20 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         completions.append(record)
         lastCompletedAt = record.completedAt
         nextDueAt = ISODate.string(from: date.addingTimeInterval(intervalHours * 3_600))
+    }
+
+    @discardableResult
+    mutating func backfill(at date: Date, now: Date = Date()) -> Bool {
+        guard
+            let lastCompletedDate,
+            date > lastCompletedDate,
+            date <= now
+        else {
+            return false
+        }
+
+        complete(at: date)
+        return true
     }
 
     func normalized(fallbackDate: Date = Date()) -> ReminderTask? {

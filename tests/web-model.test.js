@@ -45,6 +45,77 @@ test('完成任务会记录旧到期时间和周期快照，再从完成时刻�
   assert.equal(result.nextDueAt, '2026-07-24T03:30:00.000Z');
 });
 
+test('创建任务可使用过去的完成时间作为周期锚点，但不计入完成统计', () => {
+  const createdAt = new Date('2026-08-30T10:00:00.000Z');
+  const lastCompletedAt = new Date('2026-08-10T10:00:00.000Z');
+  const task = model.createTask(
+    {
+      name: '30 天循环',
+      intervalHours: 30 * 24,
+      lastCompletedAt,
+    },
+    createdAt,
+  );
+
+  assert.ok(task);
+  assert.equal(task.createdAt, createdAt.toISOString());
+  assert.equal(task.lastCompletedAt, lastCompletedAt.toISOString());
+  assert.equal(task.nextDueAt, '2026-09-09T10:00:00.000Z');
+  assert.deepEqual(task.completions, []);
+  assert.equal(model.calculateStatistics([task], createdAt).total, 0);
+});
+
+test('默认创建仍以创建时刻作为当前周期起点', () => {
+  const createdAt = new Date('2026-08-30T10:00:00.000Z');
+  const task = model.createTask({ name: '默认任务', intervalHours: 48 }, createdAt);
+
+  assert.ok(task);
+  assert.equal(task.lastCompletedAt, createdAt.toISOString());
+  assert.equal(task.nextDueAt, '2026-09-01T10:00:00.000Z');
+  assert.deepEqual(task.completions, []);
+});
+
+test('补记完成会按指定时间重置，并保留补记前的计划到期时间', () => {
+  const now = new Date('2026-07-22T10:00:00.000Z');
+  const completedAt = new Date('2026-07-22T07:00:00.000Z');
+  const result = model.backfillTask(legacyTask(), completedAt, now);
+
+  assert.ok(result);
+  assert.equal(result.completions.length, 1);
+  assert.equal(result.completions[0].completedAt, completedAt.toISOString());
+  assert.equal(result.completions[0].scheduledDueAt, '2026-07-22T04:00:00.000Z');
+  assert.equal(result.nextDueAt, '2026-07-24T07:00:00.000Z');
+});
+
+test('补记完成拒绝不晚于上次完成或晚于当前时间的值', () => {
+  const now = new Date('2026-07-22T10:00:00.000Z');
+  const original = legacyTask();
+
+  assert.equal(model.backfillTask(original, '2026-07-20T04:00:00.000Z', now), null);
+  assert.equal(model.backfillTask(original, '2026-07-20T03:59:00.000Z', now), null);
+  assert.equal(model.backfillTask(original, '2026-07-22T10:01:00.000Z', now), null);
+  assert.deepEqual(original, legacyTask());
+});
+
+test('自定义周期锚点和补记记录可通过 v3 备份往返', () => {
+  const createdAt = new Date('2026-08-30T10:00:00.000Z');
+  const task = model.createTask(
+    {
+      name: '换滤芯',
+      intervalHours: 30 * 24,
+      lastCompletedAt: '2026-08-10T10:00:00.000Z',
+      reminders: [{ id: 'due', mode: 'due', amount: 0 }],
+    },
+    createdAt,
+  );
+  const completed = model.backfillTask(task, '2026-08-20T10:00:00.000Z', createdAt);
+  const restored = model.parseBackup(JSON.stringify(model.createBackup([completed], createdAt)));
+
+  assert.equal(restored.tasks.length, 1);
+  assert.deepEqual(restored.tasks[0], completed);
+  assert.equal(restored.completionCount, 1);
+});
+
 test('迁移会过滤损坏及重复完成记录', () => {
   const valid = completion(
     'completion-1',

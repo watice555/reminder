@@ -133,15 +133,22 @@ private struct ReminderDraftRow: View {
 
 struct TaskEditorView: View {
     let task: ReminderTask?
-    let onSave: (String, Double, [ReminderRule]) -> Void
+    let onSave: (String, Double, [ReminderRule], Date?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var days: String
     @State private var hours: String
     @State private var reminderDrafts: [ReminderDraft]
+    @State private var advancedSettingsExpanded = false
+    @State private var usesCustomInitialCompletion = false
+    @State private var initialCompletedAt: Date
+    @State private var showCustomCompletionConfirmation = false
 
-    init(task: ReminderTask?, onSave: @escaping (String, Double, [ReminderRule]) -> Void) {
+    init(
+        task: ReminderTask?,
+        onSave: @escaping (String, Double, [ReminderRule], Date?) -> Void
+    ) {
         self.task = task
         self.onSave = onSave
         let interval = task?.intervalHours ?? 48
@@ -156,6 +163,7 @@ struct TaskEditorView: View {
                 ReminderDraft(rule: $0, defaultRemainingHours: max(0.25, interval / 2))
             }
         )
+        _initialCompletedAt = State(initialValue: ReminderDate.floorToMinute(Date()))
     }
 
     private var intervalHours: Double? {
@@ -202,6 +210,32 @@ struct TaskEditorView: View {
                     }
                 }
 
+                if task == nil {
+                    Section {
+                        DisclosureGroup(
+                            "高级设置",
+                            isExpanded: $advancedSettingsExpanded
+                        ) {
+                            Toggle(
+                                "自定义上次完成时间",
+                                isOn: $usesCustomInitialCompletion
+                            )
+
+                            if usesCustomInitialCompletion {
+                                DatePicker(
+                                    "上次完成时间",
+                                    selection: $initialCompletedAt,
+                                    in: ...Date(),
+                                    displayedComponents: [.date, .hourAndMinute]
+                                )
+                                Text("只用于确定当前周期，不会计入完成统计。")
+                                    .font(.caption)
+                                    .foregroundStyle(AppPalette.muted)
+                            }
+                        }
+                    }
+                }
+
                 Section {
                     if reminderDrafts.isEmpty {
                         Text("未设置系统提醒")
@@ -236,21 +270,65 @@ struct TaskEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
                         guard let intervalHours, let reminderRules else { return }
-                        onSave(
-                            name.trimmingCharacters(in: .whitespacesAndNewlines),
-                            intervalHours,
-                            reminderRules
-                        )
-                        dismiss()
+                        if task == nil, usesCustomInitialCompletion {
+                            showCustomCompletionConfirmation = true
+                        } else {
+                            saveAndDismiss(
+                                intervalHours: intervalHours,
+                                reminderRules: reminderRules,
+                                lastCompletedAt: nil
+                            )
+                        }
                     }
                     .disabled(
                         name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || intervalHours == nil
                             || reminderRules == nil
+                            || (usesCustomInitialCompletion && initialCompletedAt > Date())
                     )
                 }
             }
+            .onChange(of: usesCustomInitialCompletion) { enabled in
+                if enabled {
+                    initialCompletedAt = ReminderDate.floorToMinute(Date())
+                }
+            }
+            .alert("确认自定义上次完成时间", isPresented: $showCustomCompletionConfirmation) {
+                Button("确认创建") {
+                    guard let intervalHours, let reminderRules else { return }
+                    saveAndDismiss(
+                        intervalHours: intervalHours,
+                        reminderRules: reminderRules,
+                        lastCompletedAt: ReminderDate.floorToMinute(initialCompletedAt)
+                    )
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                let completedAt = ReminderDate.floorToMinute(initialCompletedAt)
+                let dueAt = intervalHours.map {
+                    completedAt.addingTimeInterval($0 * 3_600)
+                }
+                Text(
+                    "上次完成：\(DisplayFormat.dateTime(completedAt))\n" +
+                    "下次到期：\(DisplayFormat.dateTime(dueAt))\n\n" +
+                    "这个时间只用于确定当前周期，不会计入完成统计。"
+                )
+            }
         }
+    }
+
+    private func saveAndDismiss(
+        intervalHours: Double,
+        reminderRules: [ReminderRule],
+        lastCompletedAt: Date?
+    ) {
+        onSave(
+            name.trimmingCharacters(in: .whitespacesAndNewlines),
+            intervalHours,
+            reminderRules,
+            lastCompletedAt
+        )
+        dismiss()
     }
 
     private func removeReminder(id: String) {

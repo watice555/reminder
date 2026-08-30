@@ -359,6 +359,45 @@ label {
   grid-column: 1 / -1;
 }
 
+.advanced-settings {
+  border-top: 1px solid #ebe7df;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.advanced-settings summary {
+  color: #4b5563;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.toggle-label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.toggle-label input[type='checkbox'] {
+  accent-color: #17613a;
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 0;
+  width: 22px;
+}
+
+.field-hint,
+.dialog-description {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.dialog-description {
+  margin: -8px 0 14px;
+}
+
 input,
 textarea {
   background: #f9fafb;

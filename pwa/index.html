@@ -85,7 +85,7 @@
         </section>
       </section>
 
-      <p class="app-version">v2026.08.15.1</p>
+      <p class="app-version">v2026.08.30.1</p>
     </main>
 
     <dialog class="task-dialog" id="taskDialog">
@@ -122,9 +122,39 @@
             小时
           </label>
         </div>
+        <details class="advanced-settings" id="taskAdvancedSettings">
+          <summary>高级设置</summary>
+          <label class="toggle-label">
+            <input id="customInitialCompletionToggle" type="checkbox" />
+            <span>自定义上次完成时间</span>
+          </label>
+          <div id="customInitialCompletionFields" hidden>
+            <label>
+              上次完成时间
+              <input id="initialCompletedAtInput" type="datetime-local" step="60" />
+            </label>
+            <p class="field-hint">只用于确定当前周期，不会计入完成统计。</p>
+          </div>
+        </details>
         <div class="dialog-actions">
           <button class="ghost-button" id="cancelTaskButton" type="button">取消</button>
           <button class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="task-dialog" id="completionDialog">
+      <form id="completionForm">
+        <h2>补记完成</h2>
+        <p class="dialog-description" id="completionTaskName"></p>
+        <label>
+          实际完成时间
+          <input id="completionTimeInput" type="datetime-local" step="60" required />
+        </label>
+        <p class="field-hint" id="completionRangeHint"></p>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="cancelCompletionButton" type="button">取消</button>
+          <button class="primary-button" type="submit">继续</button>
         </div>
       </form>
     </dialog>

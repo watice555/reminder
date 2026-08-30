@@ -26,9 +26,26 @@ final class ReminderStore: ObservableObject {
         }
     }
 
-    func create(name: String, intervalHours: Double, reminders: [ReminderRule]) {
+    func create(
+        name: String,
+        intervalHours: Double,
+        reminders: [ReminderRule],
+        lastCompletedAt: Date? = nil,
+        now: Date = Date()
+    ) {
+        if let lastCompletedAt, lastCompletedAt > now {
+            errorMessage = "自定义上次完成时间不能晚于当前时间。"
+            return
+        }
+
         tasks.insert(
-            ReminderTask.create(name: name, intervalHours: intervalHours, reminders: reminders),
+            ReminderTask.create(
+                name: name,
+                intervalHours: intervalHours,
+                reminders: reminders,
+                lastCompletedAt: lastCompletedAt,
+                now: now
+            ),
             at: 0
         )
         persist()
@@ -47,6 +64,18 @@ final class ReminderStore: ObservableObject {
         tasks[index].complete(at: date)
         persist()
         synchronizeNotifications(requestAuthorization: false)
+    }
+
+    @discardableResult
+    func backfill(id: String, at date: Date, now: Date = Date()) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return false }
+        guard tasks[index].backfill(at: date, now: now) else {
+            errorMessage = "补记时间必须晚于上次完成时间，且不能晚于当前时间。"
+            return false
+        }
+        persist()
+        synchronizeNotifications(requestAuthorization: false)
+        return true
     }
 
     func delete(id: String) {

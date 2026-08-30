@@ -6,10 +6,104 @@ private struct EditorContext: Identifiable {
     let task: ReminderTask?
 }
 
+private struct BackfillContext: Identifiable {
+    let id = UUID()
+    let task: ReminderTask
+}
+
+private struct BackfillCompletionView: View {
+    let task: ReminderTask
+    let onConfirm: (Date) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var completedAt: Date
+    @State private var showConfirmation = false
+
+    private let earliestDate: Date
+    private let latestDate: Date
+
+    init(task: ReminderTask, onConfirm: @escaping (Date) -> Bool) {
+        self.task = task
+        self.onConfirm = onConfirm
+        let latest = ReminderDate.floorToMinute(Date())
+        let lastCompletedAt = task.lastCompletedDate ?? latest
+        let earliest = ReminderDate.floorToMinute(lastCompletedAt).addingTimeInterval(60)
+        earliestDate = earliest
+        latestDate = latest
+        _completedAt = State(initialValue: latest)
+    }
+
+    private var hasAvailableMinute: Bool {
+        earliestDate <= latestDate
+    }
+
+    private var nextDueDate: Date {
+        completedAt.addingTimeInterval(task.intervalHours * 3_600)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(task.name)
+                        .font(.headline)
+
+                    if hasAvailableMinute {
+                        DatePicker(
+                            "实际完成时间",
+                            selection: $completedAt,
+                            in: earliestDate...latestDate,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        Text(
+                            "可选择 \(DisplayFormat.dateTime(earliestDate)) 至 " +
+                            "\(DisplayFormat.dateTime(latestDate))。"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.muted)
+                    } else {
+                        Text("当前周期还没有可补记的分钟。")
+                            .foregroundStyle(AppPalette.muted)
+                    }
+                }
+            }
+            .navigationTitle("补记完成")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("继续") {
+                        showConfirmation = true
+                    }
+                    .disabled(!hasAvailableMinute)
+                }
+            }
+            .alert("确认补记完成", isPresented: $showConfirmation) {
+                Button("确认补记") {
+                    let preciseDate = ReminderDate.floorToMinute(completedAt)
+                    if onConfirm(preciseDate) {
+                        dismiss()
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(
+                    "完成时间：\(DisplayFormat.dateTime(completedAt))\n" +
+                    "下次到期：\(DisplayFormat.dateTime(nextDueDate))\n\n" +
+                    "确认后将新增 1 条完成记录，并按这个时间重排后续提醒。"
+                )
+            }
+        }
+    }
+}
+
 struct TaskListView: View {
     @EnvironmentObject private var store: ReminderStore
 
     @State private var editor: EditorContext?
+    @State private var backfillContext: BackfillContext?
     @State private var taskToDelete: ReminderTask?
     @State private var isImporting = false
     @State private var isExporting = false
@@ -42,6 +136,9 @@ struct TaskListView: View {
                                 TaskCardView(
                                     task: task,
                                     onComplete: { store.complete(id: task.id) },
+                                    onBackfill: {
+                                        backfillContext = BackfillContext(task: task)
+                                    },
                                     onEdit: { editor = EditorContext(task: task) },
                                     onDelete: { taskToDelete = task }
                                 )
@@ -91,7 +188,8 @@ struct TaskListView: View {
             }
         }
         .sheet(item: $editor) { context in
-            TaskEditorView(task: context.task) { name, intervalHours, reminders in
+            TaskEditorView(task: context.task) {
+                name, intervalHours, reminders, lastCompletedAt in
                 if let task = context.task {
                     store.update(
                         id: task.id,
@@ -100,8 +198,18 @@ struct TaskListView: View {
                         reminders: reminders
                     )
                 } else {
-                    store.create(name: name, intervalHours: intervalHours, reminders: reminders)
+                    store.create(
+                        name: name,
+                        intervalHours: intervalHours,
+                        reminders: reminders,
+                        lastCompletedAt: lastCompletedAt
+                    )
                 }
+            }
+        }
+        .sheet(item: $backfillContext) { context in
+            BackfillCompletionView(task: context.task) { completedAt in
+                store.backfill(id: context.task.id, at: completedAt)
             }
         }
         .confirmationDialog(
