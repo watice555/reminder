@@ -7,17 +7,23 @@ PROJECT_PATH="$SCRIPT_DIR/ios/CycleReminder.xcodeproj"
 SCHEME="CycleReminder"
 XCODE_PATH="/Applications/Xcode.app"
 DERIVED_DATA_PATH="/tmp/CycleReminderRenewal"
+launch_failed=0
 
 finish() {
     local exit_code=$?
     trap - EXIT
 
     if (( exit_code == 0 )); then
-        print ""
-        print "✅ 续期完成，CycleReminder 已重新安装并启动。"
+        if (( launch_failed )); then
+            print ""
+            print "✅ 续期完成，App 已重新安装（本次自动启动未成功，请按上方提示在手机上手动打开）。"
+        else
+            print ""
+            print "✅ 续期完成，CycleReminder 已重新安装并启动。"
+        fi
     else
         print ""
-        print "❌ 续期失败，请根据上方报错检查网络、Xcode 账号和手机连接状态。"
+        print "❌ 续期失败，请查看上方报错。"
     fi
 
     if [[ -t 0 ]]; then
@@ -104,6 +110,37 @@ print "📦 正在覆盖安装（不删除现有数据）…"
     "$app_path"
 
 print "🚀 正在启动 CycleReminder…"
-/usr/bin/xcrun devicectl device process launch \
-    --device "$device_id" \
-    "$bundle_id"
+/bin/sleep 3
+
+launch_app() {
+    /usr/bin/xcrun devicectl device process launch \
+        --device "$device_id" \
+        "$bundle_id" 2>&1
+}
+
+launch_output=""
+if ! launch_output="$(launch_app)"; then
+    print "⏳ 自动启动未成功，5 秒后重试…"
+    /bin/sleep 5
+    if ! launch_output="$(launch_app)"; then
+        launch_failed=1
+        print ""
+        if [[ "$launch_output" == *"not been explicitly trusted"* || "$launch_output" == *"invalid code signature"* ]]; then
+            print "ℹ️  续期和安装都已成功，只是手机需要重新信任开发者（描述文件过期数天后会出现）。"
+            print "请在 iPhone 上操作一次："
+            print "  1. 解锁 iPhone，点开「循环提醒」图标；"
+            print "  2. 若提示「未受信任的开发者」，前往 设置 → 通用 → VPN与设备管理 →"
+            print "     开发者App，点你的 Apple ID 并选择「信任」；"
+            print "  3. 回到桌面重新点开 App 即可，数据不会丢失。"
+            print "只需信任这一次，之后按周续期不会再出现。"
+        else
+            print -r -- "$launch_output"
+            print ""
+            print "⚠️  续期和安装都已成功，只是自动启动失败。请解锁 iPhone 后手动点开「循环提醒」试试。"
+        fi
+    else
+        print -r -- "$launch_output"
+    fi
+else
+    print -r -- "$launch_output"
+fi

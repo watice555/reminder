@@ -87,6 +87,8 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
 不要先从 iPhone 删除 App。脚本会使用原 Bundle Identifier 覆盖安装，以保留现有数据。
 
+如果描述文件已过期数天才续期，安装后在手机上首次打开 App 可能提示「未受信任的开发者」：前往 设置 → 通用 → VPN与设备管理 → 开发者App，信任你的 Apple ID 后再打开即可。正常按周续期不会出现这种情况。
+
 如果脚本提示无法连接 Apple 开发者服务，请让 `developer.apple.com` 和 `idmsa.apple.com` 在 VPN/代理中直连，或在续期时临时关闭 VPN/代理。
 
 ## Web 数据迁移到 iOS
