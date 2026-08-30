@@ -42,3 +42,6 @@ yarn-error.*
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
+
+# local agent metadata
+.zcode/
