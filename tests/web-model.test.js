@@ -65,7 +65,7 @@ test('迁移会过滤损坏及重复完成记录', () => {
   assert.equal(task.completions[0].id, 'completion-1');
 });
 
-test('备份导入兼容旧数组与 v2 包装，v2 往返保留历史', () => {
+test('备份导入兼容旧数组与 v3 包装，v3 往返保留历史和 iOS 提醒配置', () => {
   const tasks = [
     legacyTask({
       completions: [
@@ -74,6 +74,10 @@ test('备份导入兼容旧数组与 v2 包装，v2 往返保留历史', () => {
           '2026-07-21T04:00:00.000Z',
           '2026-07-21T05:00:00.000Z',
         ),
+      ],
+      reminders: [
+        { id: 'due-rule', mode: 'due', amount: 0 },
+        { id: 'percent-rule', mode: 'remainingPercentage', amount: 25 },
       ],
     }),
   ];
@@ -84,10 +88,29 @@ test('备份导入兼容旧数组与 v2 包装，v2 往返保留历史', () => {
 
   const exportedAt = new Date('2026-07-22T05:00:00.000Z');
   const envelope = model.createBackup(tasks, exportedAt);
-  const v2 = model.parseBackup(JSON.stringify(envelope));
-  assert.equal(envelope.schemaVersion, 2);
+  const v3 = model.parseBackup(JSON.stringify(envelope));
+  assert.equal(envelope.schemaVersion, 3);
   assert.equal(envelope.exportedAt, exportedAt.toISOString());
-  assert.deepEqual(v2.tasks, legacy.tasks);
+  assert.deepEqual(v3.tasks, legacy.tasks);
+});
+
+test('Web 往返会过滤无效提醒并保留有效的 iOS 提醒配置', () => {
+  const task = model.normalizeTask(
+    legacyTask({
+      reminders: [
+        { id: 'due', mode: 'due' },
+        { id: 'percentage', mode: 'remainingPercentage', amount: 20 },
+        { id: 'bad-percentage', mode: 'remainingPercentage', amount: 100 },
+        { id: 'bad-time', mode: 'remainingTime', amount: 48 },
+        { id: 'bad-mode', mode: 'unknown', amount: 1 },
+      ],
+    }),
+  );
+
+  assert.deepEqual(task.reminders, [
+    { id: 'due', mode: 'due', amount: 0 },
+    { id: 'percentage', mode: 'remainingPercentage', amount: 20 },
+  ]);
 });
 
 test('统计使用本地自然日，计算今日、近七天、累计和准时率', () => {

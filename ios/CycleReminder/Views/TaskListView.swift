@@ -91,11 +91,16 @@ struct TaskListView: View {
             }
         }
         .sheet(item: $editor) { context in
-            TaskEditorView(task: context.task) { name, intervalHours in
+            TaskEditorView(task: context.task) { name, intervalHours, reminders in
                 if let task = context.task {
-                    store.update(id: task.id, name: name, intervalHours: intervalHours)
+                    store.update(
+                        id: task.id,
+                        name: name,
+                        intervalHours: intervalHours,
+                        reminders: reminders
+                    )
                 } else {
-                    store.create(name: name, intervalHours: intervalHours)
+                    store.create(name: name, intervalHours: intervalHours, reminders: reminders)
                 }
             }
         }

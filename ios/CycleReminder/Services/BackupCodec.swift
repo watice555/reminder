@@ -4,7 +4,7 @@ enum BackupCodecError: LocalizedError {
     case invalidBackup
 
     var errorDescription: String? {
-        "备份必须是旧版任务数组或包含 tasks 数组的 v2 备份。"
+        "备份必须是旧版任务数组或包含 tasks 数组的备份对象。"
     }
 }
 

@@ -22,6 +22,7 @@
 		10000000000000000000000D /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* StatisticsView.swift */; };
 		10000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* Assets.xcassets */; };
 		10000000000000000000000F /* CycleReminderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* CycleReminderTests.swift */; };
+		100000000000000000000010 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* NotificationScheduler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,6 +53,7 @@
 		20000000000000000000000F /* CycleReminderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleReminderTests.swift; sourceTree = "<group>"; };
 		200000000000000000000010 /* CycleReminder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CycleReminder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000011 /* CycleReminderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CycleReminderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000012 /* NotificationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationScheduler.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -126,6 +128,7 @@
 				200000000000000000000006 /* BackupCodec.swift */,
 				200000000000000000000007 /* JSONRepository.swift */,
 				200000000000000000000008 /* BackupDocument.swift */,
+				200000000000000000000012 /* NotificationScheduler.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -264,6 +267,7 @@
 				10000000000000000000000B /* TaskCardView.swift in Sources */,
 				10000000000000000000000C /* TaskListView.swift in Sources */,
 				10000000000000000000000D /* StatisticsView.swift in Sources */,
+				100000000000000000000010 /* NotificationScheduler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

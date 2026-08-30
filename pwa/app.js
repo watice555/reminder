@@ -21,6 +21,15 @@ const completingTaskIds = new Set();
  * @property {string} nextDueAt
  * @property {string} createdAt
  * @property {Array<CompletionRecord>} completions
+ * @property {Array<ReminderRule>} reminders
+ */
+
+/**
+ * iOS 系统提醒配置。Web 端暂不调度通知，但会在导入、编辑和导出时保留这些字段。
+ * @typedef {Object} ReminderRule
+ * @property {string} id
+ * @property {'due'|'remainingPercentage'|'remainingTime'} mode
+ * @property {number} amount
  */
 
 /**

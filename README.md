@@ -6,6 +6,7 @@
 
 - 创建、编辑、删除循环任务，循环时间支持天和小时
 - 实时倒计时、到期高亮与当前周期进度
+- iOS 支持为每个任务配置多条系统通知，可按到期、剩余百分比或剩余时间触发
 - 一键“完成并重置”，从实际完成时刻计算下次到期时间
 - 记录每一次完成操作及当时的计划到期时间、循环间隔
 - 完成统计：今天、近 7 天、累计完成、准时率、7 日趋势与任务排行
@@ -97,11 +98,11 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 3. 在 iOS App 任务页左上角“备份”菜单选择“导入 JSON”。
 4. 确认任务数和完成记录数后替换本机数据。
 
-v2 备份格式为：
+v3 备份格式新增 `reminders` 字段；旧版备份仍可继续导入：
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "exportedAt": "2026-07-22T08:00:00.000Z",
   "tasks": [
     {
@@ -118,6 +119,23 @@ v2 备份格式为：
           "scheduledDueAt": "2026-07-22T09:00:00.000Z",
           "intervalHours": 48
         }
+      ],
+      "reminders": [
+        {
+          "id": "due-reminder-id",
+          "mode": "due",
+          "amount": 0
+        },
+        {
+          "id": "percentage-reminder-id",
+          "mode": "remainingPercentage",
+          "amount": 20
+        },
+        {
+          "id": "time-reminder-id",
+          "mode": "remainingTime",
+          "amount": 24
+        }
       ]
     }
   ]
@@ -128,4 +146,6 @@ Web 和 iOS 都能继续导入旧版的顶层任务数组备份。
 
 ## 当前提醒方式
 
-到期状态会在打开 Web 或 iOS App 时醒目显示。当前版本尚未加入系统本地通知或后台推送。
+iOS App 可在新增或编辑任务时添加多条系统提醒。首次保存带提醒的任务时，App 会请求通知权限；如果曾拒绝，可前往“设置 → 通知 → 循环提醒”重新开启。完成并重置任务后，提醒会按照新周期自动重排。
+
+Web/PWA 仍只在页面内显示到期状态，不发送系统通知，但导入、编辑和导出时会保留 iOS 的提醒配置。

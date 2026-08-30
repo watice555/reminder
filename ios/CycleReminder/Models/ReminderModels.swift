@@ -71,6 +71,82 @@ struct CompletionRecord: Codable, Identifiable, Equatable {
     }
 }
 
+enum ReminderMode: String, Codable, CaseIterable, Identifiable {
+    case due
+    case remainingPercentage
+    case remainingTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .due:
+            return "到期时"
+        case .remainingPercentage:
+            return "按剩余百分比"
+        case .remainingTime:
+            return "按剩余时间"
+        }
+    }
+}
+
+struct ReminderRule: Codable, Identifiable, Equatable {
+    var id: String
+    var mode: ReminderMode
+    var amount: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mode
+        case amount
+    }
+
+    init(id: String = UUID().uuidString, mode: ReminderMode, amount: Double = 0) {
+        self.id = id
+        self.mode = mode
+        self.amount = amount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        mode = try container.decode(ReminderMode.self, forKey: .mode)
+        amount = try container.decodeIfPresent(Double.self, forKey: .amount) ?? 0
+    }
+
+    func normalized(intervalHours: Double) -> ReminderRule? {
+        guard amount.isFinite else { return nil }
+
+        switch mode {
+        case .due:
+            return ReminderRule(id: id.isEmpty ? UUID().uuidString : id, mode: .due)
+        case .remainingPercentage:
+            guard amount > 0, amount < 100 else { return nil }
+        case .remainingTime:
+            guard amount > 0, amount < intervalHours else { return nil }
+        }
+
+        return ReminderRule(
+            id: id.isEmpty ? UUID().uuidString : id,
+            mode: mode,
+            amount: amount
+        )
+    }
+
+    func fireDate(dueDate: Date, intervalHours: Double) -> Date? {
+        guard let normalized = normalized(intervalHours: intervalHours) else { return nil }
+
+        switch normalized.mode {
+        case .due:
+            return dueDate
+        case .remainingPercentage:
+            return dueDate.addingTimeInterval(-intervalHours * 3_600 * normalized.amount / 100)
+        case .remainingTime:
+            return dueDate.addingTimeInterval(-normalized.amount * 3_600)
+        }
+    }
+}
+
 struct ReminderTask: Codable, Identifiable, Equatable {
     var id: String
     var name: String
@@ -79,6 +155,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
     var nextDueAt: String
     var createdAt: String
     var completions: [CompletionRecord]
+    var reminders: [ReminderRule]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -88,6 +165,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         case nextDueAt
         case createdAt
         case completions
+        case reminders
     }
 
     init(
@@ -97,7 +175,8 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         lastCompletedAt: String,
         nextDueAt: String,
         createdAt: String,
-        completions: [CompletionRecord] = []
+        completions: [CompletionRecord] = [],
+        reminders: [ReminderRule] = []
     ) {
         self.id = id
         self.name = name
@@ -106,6 +185,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         self.nextDueAt = nextDueAt
         self.createdAt = createdAt
         self.completions = completions
+        self.reminders = reminders
     }
 
     init(from decoder: Decoder) throws {
@@ -120,13 +200,22 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             LossyArray<CompletionRecord>.self,
             forKey: .completions
         )?.elements ?? []
+        reminders = try container.decodeIfPresent(
+            LossyArray<ReminderRule>.self,
+            forKey: .reminders
+        )?.elements ?? []
     }
 
     var lastCompletedDate: Date? { ISODate.parse(lastCompletedAt) }
     var nextDueDate: Date? { ISODate.parse(nextDueAt) }
     var createdDate: Date? { ISODate.parse(createdAt) }
 
-    static func create(name: String, intervalHours: Double, now: Date = Date()) -> ReminderTask {
+    static func create(
+        name: String,
+        intervalHours: Double,
+        reminders: [ReminderRule] = [],
+        now: Date = Date()
+    ) -> ReminderTask {
         let timestamp = ISODate.string(from: now)
         return ReminderTask(
             id: UUID().uuidString,
@@ -134,13 +223,15 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             intervalHours: intervalHours,
             lastCompletedAt: timestamp,
             nextDueAt: ISODate.string(from: now.addingTimeInterval(intervalHours * 3_600)),
-            createdAt: timestamp
+            createdAt: timestamp,
+            reminders: reminders.compactMap { $0.normalized(intervalHours: intervalHours) }
         )
     }
 
-    mutating func update(name: String, intervalHours: Double) {
+    mutating func update(name: String, intervalHours: Double, reminders: [ReminderRule]) {
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.intervalHours = intervalHours
+        self.reminders = reminders.compactMap { $0.normalized(intervalHours: intervalHours) }
         let anchor = lastCompletedDate ?? Date()
         nextDueAt = ISODate.string(from: anchor.addingTimeInterval(intervalHours * 3_600))
     }
@@ -171,6 +262,10 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             .compactMap { $0.normalized() }
             .filter { seenCompletionIDs.insert($0.id).inserted }
             .sorted { ($0.completedDate ?? .distantPast) < ($1.completedDate ?? .distantPast) }
+        var seenReminderIDs = Set<String>()
+        let safeReminders = reminders
+            .compactMap { $0.normalized(intervalHours: intervalHours) }
+            .filter { seenReminderIDs.insert($0.id).inserted }
 
         return ReminderTask(
             id: id.isEmpty ? UUID().uuidString : id,
@@ -179,7 +274,8 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             lastCompletedAt: ISODate.string(from: lastDate),
             nextDueAt: ISODate.string(from: dueDate),
             createdAt: ISODate.string(from: creationDate),
-            completions: safeCompletions
+            completions: safeCompletions,
+            reminders: safeReminders
         )
     }
 }
@@ -190,7 +286,7 @@ struct BackupEnvelope: Codable, Equatable {
     let tasks: [ReminderTask]
 
     init(tasks: [ReminderTask], exportedAt: Date = Date()) {
-        schemaVersion = 2
+        schemaVersion = 3
         self.exportedAt = ISODate.string(from: exportedAt)
         self.tasks = tasks
     }

@@ -7,7 +7,7 @@
     root.ReminderModel = model;
   }
 })(typeof globalThis === 'object' ? globalThis : this, () => {
-  const BACKUP_SCHEMA_VERSION = 2;
+  const BACKUP_SCHEMA_VERSION = 3;
   const DEFAULT_INTERVAL_HOURS = 48;
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -74,6 +74,48 @@
       .sort((a, b) => toTimestamp(a.completedAt) - toTimestamp(b.completedAt));
   }
 
+  function normalizeReminder(value, intervalHours) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+
+    const mode = value.mode;
+    const amount = Number(value.amount ?? 0);
+    if (!['due', 'remainingPercentage', 'remainingTime'].includes(mode) || !Number.isFinite(amount)) {
+      return null;
+    }
+    if (mode === 'remainingPercentage' && (amount <= 0 || amount >= 100)) {
+      return null;
+    }
+    if (mode === 'remainingTime' && (amount <= 0 || amount >= intervalHours)) {
+      return null;
+    }
+
+    return {
+      id: typeof value.id === 'string' && value.id ? value.id : createId(),
+      mode,
+      amount: mode === 'due' ? 0 : amount,
+    };
+  }
+
+  function normalizeReminders(values, intervalHours) {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+
+    const seenIds = new Set();
+    return values
+      .map((value) => normalizeReminder(value, intervalHours))
+      .filter((reminder) => {
+        if (!reminder || seenIds.has(reminder.id)) {
+          return false;
+        }
+
+        seenIds.add(reminder.id);
+        return true;
+      });
+  }
+
   function normalizeTask(value, fallbackDate = new Date()) {
     if (!value || typeof value !== 'object') {
       return null;
@@ -103,6 +145,7 @@
       nextDueAt,
       createdAt: toIsoString(value.createdAt, safeFallback),
       completions: normalizeCompletions(value.completions),
+      reminders: normalizeReminders(value.reminders, intervalHours),
     };
   }
 
@@ -273,6 +316,8 @@
     getTaskStatistics,
     localDateKey,
     normalizeCompletion,
+    normalizeReminder,
+    normalizeReminders,
     normalizeTask,
     normalizeTasks,
     parseBackup,

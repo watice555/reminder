@@ -30,6 +30,11 @@ struct TaskCardView: View {
                     Text("\(DisplayFormat.interval(task.intervalHours))循环")
                         .font(.caption)
                         .foregroundStyle(AppPalette.muted)
+                    if !task.reminders.isEmpty {
+                        Label("\(task.reminders.count) 条系统提醒", systemImage: "bell.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppPalette.green)
+                    }
                 }
                 Spacer()
                 Text(overdue ? "已到期" : "进行中")
