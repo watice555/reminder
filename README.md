@@ -80,15 +80,26 @@ sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
 ### 一键续期
 
-免费 Apple ID 的 Personal Team 签名每 7 天到期。首次按上面的步骤完成 Xcode 登录和签名设置后，以后可以：
+免费 Apple ID 的 Personal Team 描述文件从签发时起 7 天到期；重新构建或安装不会自动把旧描述文件的有效期重置为 7 天。首次按上面的步骤完成 Xcode 登录和签名设置后，以后可以：
 
 1. 连接并解锁 iPhone。
 2. 双击项目根目录的 **续期.command**。
-3. 等待脚本自动重新签名、覆盖安装并启动 App。
+3. 等待脚本申请描述文件、重新构建、验证有效期、覆盖安装并启动 App。
+4. 查看脚本显示的实际到期时间（北京时间）；建议每隔 5～6 天续期，并以实际到期时间为准。
 
 不要先从 iPhone 删除 App。脚本会使用原 Bundle Identifier 覆盖安装，以保留现有数据。
 
-如果描述文件已过期数天才续期，安装后在手机上首次打开 App 可能提示「未受信任的开发者」：前往 设置 → 通用 → VPN与设备管理 → 开发者App，信任你的 Apple ID 后再打开即可。正常按周续期不会出现这种情况。
+脚本会备份并移走 Mac 上与本 App 和开发者 Team 精确匹配的缓存描述文件，再执行 `clean build`，促使 Xcode 重新请求描述文件。备份保存在 `~/Library/Application Support/CycleReminder/Renewal/`，不包含手机任务数据。安装前会核对 Bundle Identifier、Team、目标设备和代码签名，并要求描述文件到期时间晚于本机找到的旧描述文件、剩余有效期至少 6 天。如果 Apple/Xcode 仍返回旧文件或校验失败，脚本会停止安装并明确报错；未完成安装时会恢复已移走的缓存文件，不覆盖 Xcode 新下载的同名文件。
+
+该流程不卸载手机 App，也不修改任务数据存储逻辑。脚本固定校验当前应用标识 `com.wuth.cyclereminder` 和 Team `YBWKLTC4VN`；如果不符，应先检查原安装身份，不要为了消除错误随意更换这些值。需要额外的数据保障时，可在 App 内通过“备份 → 导出 JSON”保存任务和完成记录。
+
+安装后如果手机提示「未受信任的开发者」：前往 设置 → 通用 → VPN与设备管理 → 开发者App，信任你的 Apple ID 后再打开。其他签名错误不能仅凭重新信任来判断已解决；自动启动失败时脚本会显示错误并提示手动检查。
+
+续期流程离线回归测试（模拟 Xcode 和 iPhone，不触碰真实签名缓存或手机）：
+
+```bash
+python3 tests/renewal-script.test.py
+```
 
 如果脚本提示无法连接 Apple 开发者服务，请让 `developer.apple.com` 和 `idmsa.apple.com` 在 VPN/代理中直连，或在续期时临时关闭 VPN/代理。
 
