@@ -87,10 +87,23 @@ for apple_service in "https://developer.apple.com/" "https://idmsa.apple.com/"; 
 done
 
 print "🔎 正在查找已连接的 iPhone…"
-destinations="$("$DEVELOPER_DIR/usr/bin/xcodebuild" \
+if ! destinations="$("$DEVELOPER_DIR/usr/bin/xcodebuild" \
     -project "$PROJECT_PATH" \
     -scheme "$SCHEME" \
-    -showdestinations 2>/dev/null)"
+    -showdestinations 2>&1)"; then
+    print -r -- "$destinations"
+    print "Xcode 查询设备失败，请先解决上方 Xcode 错误后重试。"
+    exit 1
+fi
+
+# Xcode can exit successfully even when its device plug-in cannot load.
+if [[ "$destinations" == *"DVTCoreDeviceCore"* &&
+      "$destinations" == *"Symbol not found:"* ]]; then
+    print -r -- "$destinations"
+    print "Xcode 设备组件版本不匹配，无法查找 iPhone。"
+    print "请打开 /Applications/Xcode.app，完成所需组件安装后重试。"
+    exit 1
+fi
 
 device_id="$(print -r -- "$destinations" | \
     /usr/bin/sed -nE '/platform:iOS,/p' | \
@@ -99,6 +112,7 @@ device_id="$(print -r -- "$destinations" | \
     /usr/bin/head -n 1)"
 
 if [[ -z "$device_id" ]]; then
+    print -r -- "$destinations"
     print "没有找到可用的 iPhone。"
     print "请连接并解锁 iPhone，在手机上信任这台 Mac，然后重试。"
     exit 1

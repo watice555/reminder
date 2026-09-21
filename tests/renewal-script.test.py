@@ -25,6 +25,17 @@ if tool == "security":
     sys.stdout.buffer.write(pathlib.Path(args[args.index("-i") + 1]).read_bytes())
 elif tool == "xcodebuild":
     if "-showdestinations" in args:
+        failure = os.environ.get("RENEWAL_TEST_FAILURE")
+        if failure == "device-plugin":
+            print("DVTCoreDeviceCore: Symbol not found: CoreDevice", file=sys.stderr)
+            print("{ platform:iOS, id:placeholder, name:Any iOS Device }")
+            sys.exit(0)
+        if failure == "device-query":
+            print("Xcode device query failed", file=sys.stderr)
+            sys.exit(1)
+        if failure == "no-device":
+            print("{ platform:iOS, id:placeholder, name:Any iOS Device }")
+            sys.exit(0)
         print("{ platform:iOS, id:test-iphone, name:Test iPhone }")
     else:
         assert not list((root / "Library/Developer/Xcode/UserData/Provisioning Profiles").glob("ours.mobileprovision"))
@@ -126,6 +137,21 @@ class RenewalFlowTests(unittest.TestCase):
         self.assertFalse(self.ours.exists())
         backups = list(self.root.glob("Library/Application Support/CycleReminder/Renewal/profiles.*/*.mobileprovision"))
         self.assertEqual(len(backups), 1)
+
+    def test_device_discovery_failures_keep_diagnostics_and_cache(self):
+        for failure, message in [
+            ("device-plugin", "Xcode 设备组件版本不匹配"),
+            ("device-query", "Xcode device query failed"),
+            ("no-device", "没有找到可用的 iPhone"),
+        ]:
+            with self.subTest(failure=failure):
+                self.assertNotEqual(self.run_flow(failure), 0, self.output)
+                self.assertIn(message, self.output)
+                self.assertTrue(self.ours.exists())
+                self.assertNotIn("clean build", self.calls)
+                self.assertNotIn("device install", self.calls)
+                if failure != "no-device":
+                    self.assertNotIn("没有找到可用的 iPhone", self.output)
 
     def test_same_expiry_is_not_renewal(self):
         self.write_profile(self.root / "new.mobileprovision", self.old_expiry)
