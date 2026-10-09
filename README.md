@@ -119,6 +119,8 @@ python3 tests/renewal-script.test.py
 
 ## Web 数据迁移到 iOS
 
+WebDAV 多端同步目前尚未接入。可先按 [`webdav-probe/README.md`](webdav-probe/README.md) 部署独立的 Cloudflare Workers 只读连接测试，验证网络和坚果云应用密码。
+
 浏览器的 IndexedDB 和 iOS App 沙箱互相隔离，不能自动读取。迁移方式：
 
 1. 在 Web 的任务页选择“导出 JSON”，浏览器会直接下载带时间戳的 `.json` 文件。
