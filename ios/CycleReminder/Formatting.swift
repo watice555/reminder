@@ -2,12 +2,25 @@ import Foundation
 import SwiftUI
 
 enum AppPalette {
-    static let background = Color(red: 246 / 255, green: 244 / 255, blue: 239 / 255)
-    static let ink = Color(red: 31 / 255, green: 41 / 255, blue: 51 / 255)
-    static let green = Color(red: 23 / 255, green: 97 / 255, blue: 58 / 255)
-    static let red = Color(red: 178 / 255, green: 57 / 255, blue: 35 / 255)
-    static let muted = Color(red: 107 / 255, green: 114 / 255, blue: 128 / 255)
-    static let line = Color(red: 229 / 255, green: 224 / 255, blue: 216 / 255)
+    static let background = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let ink = Color.primary
+    static let muted = Color.secondary
+    static let line = Color(uiColor: .separator)
+    static let green = adaptive(light: (0.13, 0.48, 0.28), dark: (0.40, 0.82, 0.55))
+    static let teal = adaptive(light: (0.05, 0.48, 0.47), dark: (0.32, 0.80, 0.78))
+    static let yellow = adaptive(light: (0.57, 0.40, 0.02), dark: (0.94, 0.76, 0.30))
+    static let orange = adaptive(light: (0.72, 0.32, 0.06), dark: (1, 0.62, 0.30))
+    static let red = adaptive(light: (0.76, 0.22, 0.22), dark: (1, 0.48, 0.48))
+
+    private static func adaptive(
+        light: (Double, Double, Double), dark: (Double, Double, Double)
+    ) -> Color {
+        Color(uiColor: UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        })
+    }
 }
 
 enum DisplayFormat {

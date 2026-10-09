@@ -2,10 +2,13 @@ import SwiftUI
 
 struct TaskCardView: View {
     let task: ReminderTask
+    let gracePercentage: Double
     let onComplete: () -> Void
     let onBackfill: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+
+    @State private var showingDetails = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -13,96 +16,95 @@ struct TaskCardView: View {
         }
     }
 
-    @ViewBuilder
-    private func card(at now: Date) -> some View {
-        let dueDate = task.nextDueDate ?? now
-        let remaining = dueDate.timeIntervalSince(now)
-        let overdue = remaining <= 0
-        let intervalSeconds = task.intervalHours * 3_600
-        let elapsed = now.timeIntervalSince(task.lastCompletedDate ?? now)
-        let progress = min(1, max(0, elapsed / intervalSeconds))
+    private func appearance(remaining: Double, interval: Double) -> (label: String, color: Color) {
+        if remaining < -interval * gracePercentage / 100 { return ("已超宽限", AppPalette.red) }
+        if remaining <= 0 { return ("已到期", AppPalette.orange) }
+        if remaining <= interval * 0.2 { return ("即将到期", AppPalette.yellow) }
+        if remaining <= interval * 0.5 { return ("进行中", AppPalette.teal) }
+        return ("时间充裕", AppPalette.green)
+    }
 
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
+    private func card(at now: Date) -> some View {
+        let remaining = (task.nextDueDate ?? now).timeIntervalSince(now)
+        let interval = task.intervalHours * 3_600
+        let progress = min(1, max(0, 1 - remaining / interval))
+        let state = appearance(remaining: remaining, interval: interval)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(task.name)
+                    .font(.headline)
+                    .foregroundStyle(AppPalette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Menu {
+                    Button(action: onEdit) { Label("编辑", systemImage: "pencil") }
+                    Button(action: onBackfill) { Label("补记完成", systemImage: "clock.arrow.circlepath") }
+                    Button(role: .destructive, action: onDelete) { Label("删除", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(minWidth: 44, minHeight: 32)
+                        .contentShape(Rectangle())
+                }
+                .tint(AppPalette.muted)
+                .accessibilityLabel("\(task.name)的更多操作")
+            }
+
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(task.name)
-                        .font(.headline)
-                        .foregroundStyle(AppPalette.ink)
-                    Text("\(DisplayFormat.interval(task.intervalHours))循环")
+                    Text(remaining <= 0
+                         ? "超时 \(DisplayFormat.duration(abs(remaining)))"
+                         : "剩余 \(DisplayFormat.duration(remaining))")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(state.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(state.label) · 每 \(DisplayFormat.interval(task.intervalHours))")
                         .font(.caption)
                         .foregroundStyle(AppPalette.muted)
-                    if !task.reminders.isEmpty {
-                        Label("\(task.reminders.count) 条系统提醒", systemImage: "bell.fill")
-                            .font(.caption)
-                            .foregroundStyle(AppPalette.green)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                Text(overdue ? "已到期" : "进行中")
-                    .font(.caption.bold())
-                    .foregroundStyle(overdue ? AppPalette.red : AppPalette.green)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background((overdue ? AppPalette.red : AppPalette.green).opacity(0.12))
-                    .clipShape(Capsule())
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(overdue ? "超时 \(DisplayFormat.duration(abs(remaining)))" : "剩余 \(DisplayFormat.duration(remaining))")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
-                    .foregroundStyle(overdue ? AppPalette.red : AppPalette.green)
-                Text("下次到期：\(DisplayFormat.dateTime(task.nextDueDate))")
-                Text("上次完成：\(DisplayFormat.dateTime(task.lastCompletedDate))")
-                Text("累计完成 \(task.completions.count) 次")
-                    .fontWeight(.bold)
-                    .foregroundStyle(AppPalette.green)
-            }
-            .font(.caption)
-            .foregroundStyle(AppPalette.muted)
-
-            VStack(spacing: 7) {
-                HStack {
-                    Text("本轮进度")
-                    Spacer()
-                    Text("已过去 \(Int((progress * 100).rounded()))%")
-                        .foregroundStyle(overdue ? AppPalette.red : AppPalette.green)
-                }
-                .font(.caption.bold())
-                ProgressView(value: progress)
-                    .tint(overdue ? AppPalette.red : AppPalette.green)
-            }
-
-            HStack(spacing: 8) {
+                Spacer(minLength: 0)
                 Button(action: onComplete) {
-                    Text("完成并重置")
-                        .frame(maxWidth: .infinity)
+                    Label("完成", systemImage: "checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .tint(AppPalette.green)
+                .fixedSize()
                 .contextMenu {
                     Button(action: onBackfill) {
                         Label("补记完成", systemImage: "clock.arrow.circlepath")
                     }
                 }
-                .accessibilityHint("长按可补记完成")
+                .accessibilityHint("记录当前完成时间，并开始下一个周期。长按可补记完成")
                 .accessibilityAction(named: Text("补记完成"), onBackfill)
-
-                Button("编辑", action: onEdit)
-                    .buttonStyle(.bordered)
-                    .tint(AppPalette.ink)
-
-                Button("删除", role: .destructive, action: onDelete)
-                    .buttonStyle(.bordered)
             }
-            .font(.subheadline.bold())
+
+            ProgressView(value: progress)
+                .tint(state.color)
+                .accessibilityLabel("本轮进度")
+
+            DisclosureGroup(isExpanded: $showingDetails) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("上次完成  \(DisplayFormat.dateTime(task.lastCompletedDate))")
+                    Text("累计 \(task.completions.count) 次完成 · \(task.reminders.count) 条提醒")
+                    Text("统计宽限 \(DisplayFormat.number(gracePercentage))%")
+                    Text("绿：剩余 >50% · 青：20%–50% · 黄：≤20%\n橙：已到期且在宽限内 · 红：超出宽限")
+                }
+                .font(.caption)
+                .foregroundStyle(AppPalette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+            } label: {
+                Text("\(DisplayFormat.dateTime(task.nextDueDate)) 到期")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.muted)
+            }
+            .tint(AppPalette.muted)
         }
         .padding(16)
-        .background(Color.white)
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(overdue ? AppPalette.red.opacity(0.65) : AppPalette.line, lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(AppPalette.surface, in: RoundedRectangle(cornerRadius: 20))
         .accessibilityElement(children: .contain)
     }
 }

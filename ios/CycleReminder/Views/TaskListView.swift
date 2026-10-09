@@ -136,6 +136,7 @@ struct TaskListView: View {
                             ForEach(store.sortedTasks) { task in
                                 TaskCardView(
                                     task: task,
+                                    gracePercentage: task.gracePercentage ?? store.gracePercentage,
                                     onComplete: { store.complete(id: task.id) },
                                     onBackfill: {
                                         backfillContext = BackfillContext(task: task)
@@ -150,17 +151,6 @@ struct TaskListView: View {
                 }
             }
             .navigationTitle("循环提醒")
-            .safeAreaInset(edge: .top) {
-                HStack {
-                    Text("\(store.tasks.count) 个任务保存在本机")
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.muted)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(AppPalette.background)
-            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
