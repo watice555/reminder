@@ -161,6 +161,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
     var nextDueAt: String
     var createdAt: String
     var completions: [CompletionRecord]
+    var gracePercentage: Double?
     var reminders: [ReminderRule]
 
     enum CodingKeys: String, CodingKey {
@@ -171,6 +172,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         case nextDueAt
         case createdAt
         case completions
+        case gracePercentage
         case reminders
     }
 
@@ -182,7 +184,8 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         nextDueAt: String,
         createdAt: String,
         completions: [CompletionRecord] = [],
-        reminders: [ReminderRule] = []
+        reminders: [ReminderRule] = [],
+        gracePercentage: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -191,6 +194,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         self.nextDueAt = nextDueAt
         self.createdAt = createdAt
         self.completions = completions
+        self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
         self.reminders = reminders
     }
 
@@ -206,6 +210,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             LossyArray<CompletionRecord>.self,
             forKey: .completions
         )?.elements ?? []
+        gracePercentage = StatisticsCalculator.validGrace(try container.decodeIfPresent(Double.self, forKey: .gracePercentage))
         reminders = try container.decodeIfPresent(
             LossyArray<ReminderRule>.self,
             forKey: .reminders
@@ -298,7 +303,8 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             nextDueAt: ISODate.string(from: dueDate),
             createdAt: ISODate.string(from: creationDate),
             completions: safeCompletions,
-            reminders: safeReminders
+            reminders: safeReminders,
+            gracePercentage: gracePercentage
         )
     }
 }
@@ -306,22 +312,26 @@ struct ReminderTask: Codable, Identifiable, Equatable {
 struct BackupEnvelope: Codable, Equatable {
     let schemaVersion: Int
     let exportedAt: String
+    let gracePercentage: Double
     let tasks: [ReminderTask]
 
-    init(tasks: [ReminderTask], exportedAt: Date = Date()) {
-        schemaVersion = 3
+    init(tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10) {
+        schemaVersion = 4
+        self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage) ?? 10
         self.exportedAt = ISODate.string(from: exportedAt)
         self.tasks = tasks
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion
+        case gracePercentage
         case exportedAt
         case tasks
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        gracePercentage = StatisticsCalculator.validGrace(try container.decodeIfPresent(Double.self, forKey: .gracePercentage)) ?? 10
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         exportedAt = try container.decodeIfPresent(String.self, forKey: .exportedAt) ?? ISODate.string(from: Date())
         tasks = try container.decode(LossyArray<ReminderTask>.self, forKey: .tasks).elements

@@ -14,10 +14,15 @@ struct JSONRepository {
         return (try? BackupCodec.decode(data)) ?? []
     }
 
-    func save(_ tasks: [ReminderTask]) throws {
+    func loadGracePercentage() -> Double {
+        guard let data = try? Data(contentsOf: fileURL) else { return 10 }
+        return BackupCodec.gracePercentage(from: data)
+    }
+
+    func save(_ tasks: [ReminderTask], gracePercentage: Double = 10) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try BackupCodec.encode(tasks)
+        let data = try BackupCodec.encode(tasks, gracePercentage: gracePercentage)
         try data.write(to: fileURL, options: .atomic)
     }
 

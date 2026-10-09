@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class ReminderStore: ObservableObject {
     @Published private(set) var tasks: [ReminderTask]
+    @Published private(set) var gracePercentage: Double
     @Published var errorMessage: String?
 
     private let repository: JSONRepository
@@ -17,6 +18,7 @@ final class ReminderStore: ObservableObject {
         self.notificationScheduler = notificationScheduler
         let loadedTasks = repository.load()
         tasks = loadedTasks
+        gracePercentage = repository.loadGracePercentage()
         synchronizeNotifications(requestAuthorization: false)
     }
 
@@ -31,6 +33,7 @@ final class ReminderStore: ObservableObject {
         intervalHours: Double,
         reminders: [ReminderRule],
         lastCompletedAt: Date? = nil,
+        gracePercentage: Double? = nil,
         now: Date = Date()
     ) {
         if let lastCompletedAt, lastCompletedAt > now {
@@ -48,12 +51,14 @@ final class ReminderStore: ObservableObject {
             ),
             at: 0
         )
+        tasks[0].gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
         persist()
         synchronizeNotifications(requestAuthorization: !reminders.isEmpty)
     }
 
-    func update(id: String, name: String, intervalHours: Double, reminders: [ReminderRule]) {
+    func update(id: String, name: String, intervalHours: Double, reminders: [ReminderRule], gracePercentage: Double? = nil) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        tasks[index].gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
         tasks[index].update(name: name, intervalHours: intervalHours, reminders: reminders)
         persist()
         synchronizeNotifications(requestAuthorization: !reminders.isEmpty)
@@ -84,7 +89,8 @@ final class ReminderStore: ObservableObject {
         synchronizeNotifications(requestAuthorization: false)
     }
 
-    func replace(with importedTasks: [ReminderTask]) {
+    func replace(with importedTasks: [ReminderTask], gracePercentage: Double = 10) {
+        self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage) ?? 10
         var seenIDs = Set<String>()
         tasks = importedTasks
             .compactMap { $0.normalized() }
@@ -93,13 +99,19 @@ final class ReminderStore: ObservableObject {
         synchronizeNotifications(requestAuthorization: tasks.contains { !$0.reminders.isEmpty })
     }
 
+    func setGracePercentage(_ value: Double) {
+        guard let value = StatisticsCalculator.validGrace(value) else { return }
+        gracePercentage = value
+        persist()
+    }
+
     func refreshNotifications() {
         synchronizeNotifications(requestAuthorization: false)
     }
 
     private func persist() {
         do {
-            try repository.save(tasks)
+            try repository.save(tasks, gracePercentage: gracePercentage)
         } catch {
             errorMessage = "保存失败：\(error.localizedDescription)"
         }

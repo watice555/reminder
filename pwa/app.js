@@ -1,6 +1,8 @@
 const DB_NAME = 'cycle-reminder-db';
 const DB_VERSION = 1;
 const TASK_STORE = 'tasks';
+const GRACE_KEY = 'cycle-reminder.grace.v1';
+let globalGrace = 10;
 const SNAPSHOT_KEY = 'cycle-reminder.snapshot.v1';
 const { DEFAULT_INTERVAL_HOURS } = ReminderModel;
 
@@ -77,12 +79,11 @@ const elements = {
   statisticsViewTab: document.querySelector('#statisticsViewTab'),
   taskView: document.querySelector('#taskView'),
   statisticsView: document.querySelector('#statisticsView'),
-  statisticsToday: document.querySelector('#statisticsToday'),
-  statisticsSevenDays: document.querySelector('#statisticsSevenDays'),
-  statisticsTotal: document.querySelector('#statisticsTotal'),
+  taskGraceInput: document.querySelector('#taskGraceInput'),
+  globalGraceInput: document.querySelector('#globalGraceInput'),
+  graceForm: document.querySelector('#graceForm'),
   statisticsOnTime: document.querySelector('#statisticsOnTime'),
   statisticsHint: document.querySelector('#statisticsHint'),
-  statisticsChart: document.querySelector('#statisticsChart'),
   statisticsRanking: document.querySelector('#statisticsRanking'),
 };
 
@@ -92,13 +93,31 @@ async function init() {
   bindEvents();
   registerServiceWorker();
   await prepareStorage();
+  try {
+    globalGrace = ReminderModel.normalizeGrace(JSON.parse(localStorage.getItem(GRACE_KEY)), 10);
+  } catch { globalGrace = 10; }
+  elements.globalGraceInput.value = globalGrace;
   tasks = await loadTasks();
   await persistTasks(tasks);
   render();
   setInterval(render, 30_000);
 }
 
+function saveGlobalGrace(value) {
+  globalGrace = value;
+  elements.globalGraceInput.value = value;
+  try { localStorage.setItem(GRACE_KEY, JSON.stringify(value)); }
+  catch { showStorageNotice('宽限配置保存失败，请导出 JSON 备份。'); }
+}
+
 function bindEvents() {
+  elements.graceForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = ReminderModel.normalizeGrace(Number(elements.globalGraceInput.value));
+    if (value === null || !elements.globalGraceInput.value.trim()) return;
+    saveGlobalGrace(value);
+    renderStatistics(Date.now());
+  });
   elements.newTaskButton.addEventListener('click', () => openTaskDialog());
   elements.cancelTaskButton.addEventListener('click', closeTaskDialog);
   elements.taskForm.addEventListener('submit', handleTaskSubmit);
@@ -277,6 +296,12 @@ async function handleTaskSubmit(event) {
 
   const name = elements.taskNameInput.value.trim();
   const intervalHours = parseFormInterval();
+  const graceText = elements.taskGraceInput.value.trim();
+  const gracePercentage = graceText ? ReminderModel.normalizeGrace(Number(graceText)) : null;
+  if (graceText && gracePercentage === null) {
+    alert('宽限比例必须是大于或等于 0 的数字。');
+    return;
+  }
 
   if (!name) {
     alert('请输入任务名称。');
@@ -297,6 +322,7 @@ async function handleTaskSubmit(event) {
       return {
         ...task,
         name,
+        gracePercentage,
         intervalHours,
         nextDueAt: addHours(new Date(task.lastCompletedAt), intervalHours).toISOString(),
       };
@@ -318,6 +344,7 @@ async function handleTaskSubmit(event) {
     const task = ReminderModel.createTask(
       {
         name,
+        gracePercentage,
         intervalHours,
         lastCompletedAt: customCompletedAt,
       },
@@ -430,6 +457,8 @@ function openTaskDialog(task = null) {
   editingTaskId = task?.id || null;
   elements.taskDialogTitle.textContent = task ? '编辑任务' : '新增任务';
   elements.taskNameInput.value = task?.name || '';
+  elements.taskGraceInput.value = task?.gracePercentage ?? '';
+  elements.taskGraceInput.placeholder = `跟随全局（${globalGrace}%）`;
   setIntervalInputs(task?.intervalHours || DEFAULT_INTERVAL_HOURS);
   elements.taskAdvancedSettings.hidden = Boolean(task);
   elements.taskAdvancedSettings.open = false;
@@ -492,7 +521,7 @@ function closeCompletionDialog() {
 }
 
 function downloadBackupFile() {
-  const json = JSON.stringify(ReminderModel.createBackup(tasks), null, 2);
+  const json = JSON.stringify(ReminderModel.createBackup(tasks, new Date(), globalGrace), null, 2);
 
   try {
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -540,13 +569,14 @@ async function handleImport() {
     const backup = ReminderModel.parseBackup(elements.dataText.value);
     if (
       !confirm(
-        `将用 ${backup.tasks.length} 个任务和 ${backup.completionCount} 条完成记录替换当前数据，确定继续吗？`,
+        `将用 ${backup.tasks.length} 个任务和 ${backup.completionCount} 条完成记录替换当前数据，并将全局宽限设为 ${backup.gracePercentage}%，确定继续吗？`,
       )
     ) {
       return;
     }
 
     tasks = backup.tasks;
+    saveGlobalGrace(backup.gracePercentage);
     await persistTasks(tasks);
     closeDataDialog();
     render();
@@ -692,67 +722,36 @@ function bindCompletionButton(button, taskId) {
 }
 
 function renderStatistics(now) {
-  const statistics = ReminderModel.calculateStatistics(tasks, now);
-  elements.statisticsToday.textContent = String(statistics.today);
-  elements.statisticsSevenDays.textContent = String(statistics.lastSevenDays);
-  elements.statisticsTotal.textContent = String(statistics.total);
-  elements.statisticsOnTime.textContent =
-    statistics.onTimeRate === null ? '—' : `${Math.round(statistics.onTimeRate * 100)}%`;
-  elements.statisticsHint.textContent = statistics.total
-    ? `共记录 ${statistics.total} 次完成，准时 ${statistics.onTimeCount} 次。`
-    : '统计从本次升级后开始；旧任务的当前周期会保留，但不会伪造历史完成次数。';
-
-  const maxDailyCount = Math.max(1, ...statistics.daily.map((item) => item.count));
-  elements.statisticsChart.textContent = '';
-  statistics.daily.forEach((item) => {
-    const column = document.createElement('div');
-    column.className = 'chart-column';
-    column.setAttribute('aria-label', `${item.label} 完成 ${item.count} 次`);
-
-    const count = document.createElement('strong');
-    count.textContent = String(item.count);
-    const track = document.createElement('div');
-    track.className = 'chart-track';
-    const bar = document.createElement('div');
-    bar.className = 'chart-bar';
-    bar.style.height = `${Math.max(item.count ? 10 : 2, (item.count / maxDailyCount) * 100)}%`;
-    const label = document.createElement('span');
-    label.textContent = item.label;
-
-    track.append(bar);
-    column.append(count, track, label);
-    elements.statisticsChart.append(column);
-  });
-
+  const statistics = ReminderModel.calculateStatistics(tasks, now, globalGrace);
+  const rate = (value) => value === null ? '—' : `${formatNumber(value * 100)}%`;
+  elements.statisticsOnTime.textContent = rate(statistics.onTimeRate);
+  elements.statisticsHint.textContent = `基于 ${statistics.cycleCount} 个周期，其中 ${statistics.overdueCount} 个超出宽限未完成`;
   elements.statisticsRanking.textContent = '';
   if (!statistics.taskRanking.length) {
     const empty = document.createElement('p');
     empty.className = 'statistics-empty';
-    empty.textContent = '完成一次任务后，这里会显示任务排行。';
+    empty.textContent = '添加任务后，这里会显示统计。';
     elements.statisticsRanking.append(empty);
-    return;
   }
-
-  statistics.taskRanking.forEach((item, index) => {
-    const row = document.createElement('div');
-    row.className = 'ranking-row';
-    const main = document.createElement('div');
-    const name = document.createElement('strong');
-    name.textContent = `${index + 1}. ${item.name}`;
-    const detail = document.createElement('span');
-    detail.textContent = item.latestCompletedAt
-      ? `最近完成 ${formatDateTime(item.latestCompletedAt)}`
-      : '暂无完成记录';
-    const result = document.createElement('div');
-    result.className = 'ranking-result';
-    const total = document.createElement('strong');
-    total.textContent = `${item.total} 次`;
-    const rate = document.createElement('span');
-    rate.textContent = item.onTimeRate === null ? '暂无准时率' : `准时 ${Math.round(item.onTimeRate * 100)}%`;
-
-    main.append(name, detail);
-    result.append(total, rate);
-    row.append(main, result);
+  statistics.taskRanking.forEach((item) => {
+    const row = document.createElement('article');
+    row.className = 'statistics-task';
+    const heading = document.createElement('h3');
+    heading.textContent = item.name;
+    row.append(heading);
+    const lines = [
+      `准时率：${rate(item.onTimeRate)}`,
+      `实际间隔中位数：${item.medianIntervalHours === null ? '—' : formatInterval(item.medianIntervalHours)}`,
+      `实际／计划间隔比：${rate(item.medianIntervalRatio)}`,
+      `${item.cycleCount} 个周期 · ${item.overdueCount} 个超出宽限未完成 · 宽限 ${formatNumber(item.gracePercentage)}%`,
+      item.intervalCount ? `间隔基于 ${item.intervalCount} 组相邻完成记录` : '至少两条真实完成记录才能计算间隔',
+    ];
+    lines.forEach((line, index) => {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = line;
+      if (index >= 3) paragraph.className = 'field-hint';
+      row.append(paragraph);
+    });
     elements.statisticsRanking.append(row);
   });
 }

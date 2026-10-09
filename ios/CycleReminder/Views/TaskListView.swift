@@ -108,6 +108,7 @@ struct TaskListView: View {
     @State private var isImporting = false
     @State private var isExporting = false
     @State private var exportDocument: BackupDocument?
+    @State private var pendingGracePercentage: Double = 10
     @State private var pendingImportedTasks: [ReminderTask] = []
     @State private var showImportConfirmation = false
 
@@ -189,20 +190,22 @@ struct TaskListView: View {
         }
         .sheet(item: $editor) { context in
             TaskEditorView(task: context.task) {
-                name, intervalHours, reminders, lastCompletedAt in
+                name, intervalHours, reminders, lastCompletedAt, gracePercentage in
                 if let task = context.task {
                     store.update(
                         id: task.id,
                         name: name,
                         intervalHours: intervalHours,
-                        reminders: reminders
+                        reminders: reminders,
+                        gracePercentage: gracePercentage
                     )
                 } else {
                     store.create(
                         name: name,
                         intervalHours: intervalHours,
                         reminders: reminders,
-                        lastCompletedAt: lastCompletedAt
+                        lastCompletedAt: lastCompletedAt,
+                        gracePercentage: gracePercentage
                     )
                 }
             }
@@ -242,19 +245,19 @@ struct TaskListView: View {
         }
         .alert("导入备份", isPresented: $showImportConfirmation) {
             Button("替换当前数据", role: .destructive) {
-                store.replace(with: pendingImportedTasks)
+                store.replace(with: pendingImportedTasks, gracePercentage: pendingGracePercentage)
                 pendingImportedTasks = []
             }
             Button("取消", role: .cancel) { pendingImportedTasks = [] }
         } message: {
             let completions = pendingImportedTasks.reduce(0) { $0 + $1.completions.count }
-            Text("将用 \(pendingImportedTasks.count) 个任务和 \(completions) 条完成记录替换当前数据。")
+            Text("将用 \(pendingImportedTasks.count) 个任务和 \(completions) 条完成记录替换当前数据，并将全局宽限设为 \(DisplayFormat.number(pendingGracePercentage))%。")
         }
     }
 
     private func prepareExport() {
         do {
-            exportDocument = try BackupDocument(tasks: store.tasks)
+            exportDocument = try BackupDocument(tasks: store.tasks, gracePercentage: store.gracePercentage)
             isExporting = true
         } catch {
             store.errorMessage = "导出失败：\(error.localizedDescription)"
@@ -268,6 +271,7 @@ struct TaskListView: View {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
             pendingImportedTasks = try BackupCodec.decode(data)
+            pendingGracePercentage = BackupCodec.gracePercentage(from: data)
             showImportConfirmation = true
         } catch {
             store.errorMessage = "导入失败：\(error.localizedDescription)"

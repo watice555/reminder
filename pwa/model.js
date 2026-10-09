@@ -7,9 +7,20 @@
     root.ReminderModel = model;
   }
 })(typeof globalThis === 'object' ? globalThis : this, () => {
-  const BACKUP_SCHEMA_VERSION = 3;
+  const BACKUP_SCHEMA_VERSION = 4;
   const DEFAULT_INTERVAL_HOURS = 48;
   const DAY_MS = 24 * 60 * 60 * 1000;
+
+  function normalizeGrace(value, fallback = null) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+  }
+
+  function median(values) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
 
   function createId(now = Date.now()) {
     return `${now}-${Math.random().toString(36).slice(2, 9)}`;
@@ -146,6 +157,7 @@
       createdAt: toIsoString(value.createdAt, safeFallback),
       completions: normalizeCompletions(value.completions),
       reminders: normalizeReminders(value.reminders, intervalHours),
+      gracePercentage: normalizeGrace(value.gracePercentage),
     };
   }
 
@@ -202,6 +214,7 @@
         createdAt: new Date(createdTimestamp).toISOString(),
         completions: [],
         reminders: value.reminders,
+        gracePercentage: value.gracePercentage,
       },
       new Date(createdTimestamp),
     );
@@ -253,9 +266,10 @@
     return completeTask(normalized, new Date(completedTimestamp));
   }
 
-  function createBackup(tasks, exportedAt = new Date()) {
+  function createBackup(tasks, exportedAt = new Date(), gracePercentage = 10) {
     return {
       schemaVersion: BACKUP_SCHEMA_VERSION,
+      gracePercentage: normalizeGrace(gracePercentage, 10),
       exportedAt: toIsoString(exportedAt),
       tasks: normalizeTasks(tasks, exportedAt),
     };
@@ -278,6 +292,7 @@
     return {
       schemaVersion: Array.isArray(parsed) ? 1 : Number(parsed.schemaVersion) || 2,
       tasks,
+      gracePercentage: normalizeGrace(parsed?.gracePercentage, 10),
       completionCount: tasks.reduce((total, task) => total + task.completions.length, 0),
     };
   }
@@ -295,21 +310,35 @@
     return `${date.getFullYear()}-${month}-${day}`;
   }
 
-  function getTaskStatistics(task) {
-    const completions = normalizeCompletions(task?.completions);
-    const onTimeCount = completions.filter(
-      (item) => toTimestamp(item.completedAt) <= toTimestamp(item.scheduledDueAt),
-    ).length;
-
+  function getTaskStatistics(task, now = new Date(), globalGrace = 10) {
+    const timestamp = toTimestamp(now) ?? Date.now();
+    const completions = normalizeCompletions(task?.completions)
+      .filter((item) => toTimestamp(item.completedAt) <= timestamp);
+    const grace = normalizeGrace(task?.gracePercentage, normalizeGrace(globalGrace, 10));
+    const onTime = completions.filter((item) =>
+      toTimestamp(item.completedAt) <= toTimestamp(item.scheduledDueAt) + item.intervalHours * 3600000 * grace / 100);
+    const due = toTimestamp(task?.nextDueAt);
+    const overdue = due !== null && timestamp > due + task.intervalHours * 3600000 * grace / 100;
+    const cycleCount = completions.length + Number(overdue);
+    const intervals = completions.slice(1).map((item, index) =>
+      (toTimestamp(item.completedAt) - toTimestamp(completions[index].completedAt)) / 3600000);
     return {
       total: completions.length,
-      onTimeCount,
-      onTimeRate: completions.length ? onTimeCount / completions.length : null,
-      latestCompletedAt: completions.length ? completions[completions.length - 1].completedAt : null,
+      cycleCount,
+      overdueCount: Number(overdue),
+      onTimeCount: onTime.length,
+      onTimeRate: cycleCount ? onTime.length / cycleCount : null,
+      onTimeWeight: onTime.reduce((sum, item) => sum + item.intervalHours, 0),
+      totalWeight: completions.reduce((sum, item) => sum + item.intervalHours, 0) + (overdue ? task.intervalHours : 0),
+      medianIntervalHours: median(intervals),
+      medianIntervalRatio: median(intervals.map((hours, index) => hours / completions[index + 1].intervalHours)),
+      intervalCount: intervals.length,
+      gracePercentage: grace,
+      latestCompletedAt: completions.at(-1)?.completedAt ?? null,
     };
   }
 
-  function calculateStatistics(tasks, now = new Date()) {
+  function calculateStatistics(tasks, now = new Date(), globalGrace = 10) {
     const safeTasks = normalizeTasks(tasks, now);
     const nowDate = now instanceof Date ? new Date(now) : new Date(now);
     const safeNow = Number.isFinite(nowDate.getTime()) ? nowDate : new Date();
@@ -324,9 +353,7 @@
     const lastSeven = completions.filter(
       (completion) => toTimestamp(completion.completedAt) >= sevenDayStart.getTime(),
     );
-    const onTimeCount = completions.filter(
-      (completion) => toTimestamp(completion.completedAt) <= toTimestamp(completion.scheduledDueAt),
-    ).length;
+
     const dailyCounts = new Map();
     lastSeven.forEach((completion) => {
       const key = localDateKey(completion.completedAt);
@@ -348,17 +375,20 @@
       .map((task) => ({
         taskId: task.id,
         name: task.name,
-        ...getTaskStatistics(task),
+        ...getTaskStatistics(task, safeNow, globalGrace),
       }))
-      .filter((item) => item.total > 0)
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-CN'));
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+    const totalWeight = taskRanking.reduce((sum, item) => sum + item.totalWeight, 0);
+    const onTimeWeight = taskRanking.reduce((sum, item) => sum + item.onTimeWeight, 0);
 
     return {
       total: completions.length,
       today: completions.filter((completion) => localDateKey(completion.completedAt) === todayKey).length,
       lastSevenDays: lastSeven.length,
-      onTimeCount,
-      onTimeRate: completions.length ? onTimeCount / completions.length : null,
+      onTimeCount: taskRanking.reduce((sum, item) => sum + item.onTimeCount, 0),
+      cycleCount: taskRanking.reduce((sum, item) => sum + item.cycleCount, 0),
+      overdueCount: taskRanking.reduce((sum, item) => sum + item.overdueCount, 0),
+      onTimeRate: totalWeight ? onTimeWeight / totalWeight : null,
       daily,
       taskRanking,
     };
@@ -376,6 +406,7 @@
     createTask,
     getTaskStatistics,
     localDateKey,
+    normalizeGrace,
     normalizeCompletion,
     normalizeReminder,
     normalizeReminders,

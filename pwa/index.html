@@ -46,46 +46,32 @@
         <section class="statistics-summary" aria-labelledby="statisticsTitle">
           <div class="section-heading">
             <div>
-              <h2 id="statisticsTitle">完成统计</h2>
+              <h2 id="statisticsTitle">统计</h2>
               <p id="statisticsHint"></p>
             </div>
           </div>
-          <div class="metric-grid">
-            <article class="metric-card">
-              <span>今天</span>
-              <strong id="statisticsToday">0</strong>
-            </article>
-            <article class="metric-card">
-              <span>近 7 天</span>
-              <strong id="statisticsSevenDays">0</strong>
-            </article>
-            <article class="metric-card">
-              <span>累计完成</span>
-              <strong id="statisticsTotal">0</strong>
-            </article>
-            <article class="metric-card">
-              <span>准时率</span>
-              <strong id="statisticsOnTime">—</strong>
-            </article>
-          </div>
+          <article class="metric-card">
+            <span>加权准时率</span><strong id="statisticsOnTime">—</strong>
+          </article>
+          <p class="field-hint">全部历史 · 按当前宽限重算。以每个周期当时的计划间隔加权；当前超出宽限的周期计入一次不准时，完成后不重复计数。</p>
         </section>
-
-        <section class="statistics-panel" aria-labelledby="trendTitle">
-          <div class="section-heading">
-            <h2 id="trendTitle">最近 7 天</h2>
-          </div>
-          <div class="statistics-chart" id="statisticsChart" role="img" aria-label="最近七天完成次数"></div>
+        <section class="statistics-panel">
+          <form id="graceForm">
+            <label>全局宽限（%）<input id="globalGraceInput" type="number" min="0" step="any" required value="10" /></label>
+            <p class="field-hint">允许比计划间隔延迟的比例。任务单独配置优先；保存后重算历史，不改变到期或通知时间。</p>
+            <button class="primary-button" type="submit">保存宽限</button>
+          </form>
         </section>
 
         <section class="statistics-panel" aria-labelledby="rankingTitle">
           <div class="section-heading">
-            <h2 id="rankingTitle">任务排行</h2>
+            <h2 id="rankingTitle">任务概览</h2>
           </div>
           <div class="statistics-ranking" id="statisticsRanking"></div>
         </section>
       </section>
 
-      <p class="app-version">v2026.08.30.1</p>
+      <p class="app-version">v2026.10.09.1</p>
     </main>
 
     <dialog class="task-dialog" id="taskDialog">
@@ -122,6 +108,10 @@
             小时
           </label>
         </div>
+        <label>统计宽限（%，留空跟随全局）
+          <input id="taskGraceInput" type="number" min="0" step="any" placeholder="跟随全局" />
+        </label>
+        <p class="field-hint">0 表示不允许延迟；修改后重算历史统计。</p>
         <details class="advanced-settings" id="taskAdvancedSettings">
           <summary>高级设置</summary>
           <label class="toggle-label">
@@ -133,7 +123,7 @@
               上次完成时间
               <input id="initialCompletedAtInput" type="datetime-local" step="60" />
             </label>
-            <p class="field-hint">只用于确定当前周期，不会计入完成统计。</p>
+            <p class="field-hint">只用于确定当前周期，不会计入统计。</p>
           </div>
         </details>
         <div class="dialog-actions">

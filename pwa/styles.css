@@ -598,3 +598,10 @@ textarea {
     padding-top: max(22px, env(safe-area-inset-top));
   }
 }
+
+.statistics-task { padding: 16px 0; border-bottom: 1px solid var(--line, #ddd); }
+.statistics-task:last-child { border-bottom: 0; }
+.statistics-task h3 { margin: 0 0 12px; }
+.statistics-task p { margin: 8px 0; }
+#graceForm { display: grid; gap: 12px; }
+#graceForm label { display: grid; gap: 8px; }

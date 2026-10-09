@@ -133,9 +133,11 @@ private struct ReminderDraftRow: View {
 
 struct TaskEditorView: View {
     let task: ReminderTask?
-    let onSave: (String, Double, [ReminderRule], Date?) -> Void
+    let onSave: (String, Double, [ReminderRule], Date?, Double?) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var customGrace: Bool
+    @State private var graceText: String
     @State private var name: String
     @State private var days: String
     @State private var hours: String
@@ -147,8 +149,10 @@ struct TaskEditorView: View {
 
     init(
         task: ReminderTask?,
-        onSave: @escaping (String, Double, [ReminderRule], Date?) -> Void
+        onSave: @escaping (String, Double, [ReminderRule], Date?, Double?) -> Void
     ) {
+        _customGrace = State(initialValue: task?.gracePercentage != nil)
+        _graceText = State(initialValue: DisplayFormat.number(task?.gracePercentage ?? 10))
         self.task = task
         self.onSave = onSave
         let interval = task?.intervalHours ?? 48
@@ -208,6 +212,23 @@ struct TaskEditorView: View {
                         Text("小时")
                             .foregroundStyle(AppPalette.muted)
                     }
+                }
+
+                Section {
+                    Toggle("单独设置宽限", isOn: $customGrace)
+                    if customGrace {
+                        HStack {
+                            Text("允许延迟")
+                            TextField("10", text: $graceText).keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Text("%")
+                        }
+                        if StatisticsCalculator.validGrace(Double(graceText)) == nil {
+                            Text("请输入大于或等于 0 的百分比").foregroundStyle(AppPalette.red)
+                        }
+                    }
+                } header: { Text("统计宽限") } footer: {
+                    Text("未单独设置时跟随全局。修改后重算历史统计，不改变通知时间。")
                 }
 
                 if task == nil {
@@ -282,6 +303,7 @@ struct TaskEditorView: View {
                     }
                     .disabled(
                         name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || (customGrace && StatisticsCalculator.validGrace(Double(graceText)) == nil)
                             || intervalHours == nil
                             || reminderRules == nil
                             || (usesCustomInitialCompletion && initialCompletedAt > Date())
@@ -326,7 +348,8 @@ struct TaskEditorView: View {
             name.trimmingCharacters(in: .whitespacesAndNewlines),
             intervalHours,
             reminderRules,
-            lastCompletedAt
+            lastCompletedAt,
+            customGrace ? Double(graceText) : nil
         )
         dismiss()
     }

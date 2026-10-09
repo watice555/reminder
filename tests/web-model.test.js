@@ -136,7 +136,7 @@ test('迁移会过滤损坏及重复完成记录', () => {
   assert.equal(task.completions[0].id, 'completion-1');
 });
 
-test('备份导入兼容旧数组与 v3 包装，v3 往返保留历史和 iOS 提醒配置', () => {
+test('备份导入兼容旧数组与 v3 包装，v4 往返保留历史和 iOS 提醒配置', () => {
   const tasks = [
     legacyTask({
       completions: [
@@ -160,7 +160,7 @@ test('备份导入兼容旧数组与 v3 包装，v3 往返保留历史和 iOS �
   const exportedAt = new Date('2026-07-22T05:00:00.000Z');
   const envelope = model.createBackup(tasks, exportedAt);
   const v3 = model.parseBackup(JSON.stringify(envelope));
-  assert.equal(envelope.schemaVersion, 3);
+  assert.equal(envelope.schemaVersion, 4);
   assert.equal(envelope.exportedAt, exportedAt.toISOString());
   assert.deepEqual(v3.tasks, legacy.tasks);
 });
@@ -197,7 +197,8 @@ test('统计使用本地自然日，计算今日、近七天、累计和准时�
     ],
   });
 
-  const statistics = model.calculateStatistics([task], now);
+  task.nextDueAt = new Date(now.getTime() + 48 * 3600000).toISOString();
+  const statistics = model.calculateStatistics([task], now, 0);
   assert.equal(statistics.today, 1);
   assert.equal(statistics.lastSevenDays, 2);
   assert.equal(statistics.total, 3);
@@ -215,4 +216,61 @@ test('重复任务 id 只保留第一条，避免 IndexedDB 与内存统计分�
 
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].name, '换滤芯');
+});
+
+const hourDate = (hours) => new Date(Date.UTC(2026, 0, 1) + hours * 3600000);
+function timedTask(intervalHours, records = [], nextDue = 1000) {
+  return model.normalizeTask(legacyTask({ intervalHours, lastCompletedAt: hourDate(0), nextDueAt: hourDate(nextDue),
+    completions: records.map(([at, due, interval = intervalHours], i) => ({
+      id: String(i), completedAt: hourDate(at), scheduledDueAt: hourDate(due), intervalHours: interval,
+    })),
+  }));
+}
+
+test('宽限边界包含等号，未完成超出后仅计一个周期，历史随配置重算', () => {
+  const task = timedTask(100, [[110, 100]], 210);
+  assert.equal(model.getTaskStatistics(task, hourDate(220)).onTimeRate, 1);
+  assert.equal(model.getTaskStatistics(task, hourDate(220.001)).onTimeRate, 0.5);
+  assert.equal(model.getTaskStatistics(task, hourDate(900)).cycleCount, 2);
+  assert.equal(model.getTaskStatistics(task, hourDate(220), 0).onTimeRate, 0);
+  assert.equal(model.getTaskStatistics(task, hourDate(220.001), 15).onTimeRate, 1);
+  task.gracePercentage = 0;
+  assert.equal(model.getTaskStatistics(task, hourDate(220), 100).onTimeRate, 0);
+});
+
+test('每天七个周期和每周一个周期权重相同，完成当前逾期周期不重复扣分', () => {
+  const daily = timedTask(24, Array.from({ length: 7 }, (_, i) => [(i + 1) * 24, (i + 1) * 24 - (i === 6 ? 3 : 0)]));
+  daily.id = 'daily';
+  const weekly = timedTask(168, [], 168);
+  const now = hourDate(216);
+  const before = model.calculateStatistics([daily, weekly], now);
+  assert.equal(before.onTimeRate, 3 / 7);
+  assert.equal(before.cycleCount, 8);
+  const after = model.calculateStatistics([daily, model.completeTask(weekly, now)], now);
+  assert.equal(after.onTimeRate, before.onTimeRate);
+  assert.equal(after.cycleCount, before.cycleCount);
+  assert.equal(after.overdueCount, 0);
+});
+
+test('间隔只用真实完成记录，使用每条记录当时的计划间隔并过滤未来记录', () => {
+  const task = timedTask(300, [[24, 24, 24], [60, 60, 24], [108, 108, 48], [999, 999, 48]]);
+  const result = model.getTaskStatistics(task, hourDate(200));
+  assert.equal(result.total, 3);
+  assert.equal(result.intervalCount, 2);
+  assert.equal(result.medianIntervalHours, 42);
+  assert.equal(result.medianIntervalRatio, 1.25);
+  assert.equal(result.totalWeight, 96);
+  assert.equal(model.getTaskStatistics(timedTask(24, [[24, 24]]), hourDate(30)).medianIntervalHours, null);
+  assert.equal(model.calculateStatistics([timedTask(24)], hourDate(30)).onTimeRate, null);
+});
+
+test('v4 备份保存全局和任务宽限，旧备份默认10%，非法值不覆盖默认', () => {
+  const task = timedTask(24);
+  task.gracePercentage = 0;
+  const backup = model.parseBackup(JSON.stringify(model.createBackup([task], hourDate(0), 15)));
+  assert.equal(backup.gracePercentage, 15);
+  assert.equal(backup.tasks[0].gracePercentage, 0);
+  assert.equal(model.parseBackup([legacyTask()]).gracePercentage, 10);
+  assert.equal(model.normalizeTask({...task, gracePercentage: -1}).gracePercentage, null);
+  assert.equal(model.normalizeGrace(Infinity, 10), 10);
 });

@@ -234,10 +234,13 @@ final class CycleReminderTests: XCTestCase {
         ]
         let now = try XCTUnwrap(ISODate.parse("2026-07-22T12:00:00.000Z"))
 
+        var task = legacyTask(completions: records)
+        task.nextDueAt = ISODate.string(from: now.addingTimeInterval(48 * 3600))
         let result = StatisticsCalculator.calculate(
-            tasks: [legacyTask(completions: records)],
+            tasks: [task],
             now: now,
-            calendar: calendar
+            calendar: calendar,
+            globalGrace: 0
         )
 
         XCTAssertEqual(result.today, 1)
@@ -247,5 +250,84 @@ final class CycleReminderTests: XCTestCase {
         XCTAssertEqual(result.onTimeRate, 2.0 / 3.0)
         XCTAssertEqual(result.daily.reduce(0) { $0 + $1.count }, 2)
         XCTAssertEqual(result.taskRanking.first?.total, 3)
+    }
+
+    private func hourDate(_ hours: Double) -> Date {
+        Date(timeIntervalSince1970: 1_767_225_600 + hours * 3600)
+    }
+
+    private func timedTask(_ interval: Double, _ records: [(Double, Double, Double)] = [], due: Double = 1000) -> ReminderTask {
+        var task = legacyTask(completions: records.enumerated().map { index, values in
+            CompletionRecord(id: String(index), completedAt: ISODate.string(from: hourDate(values.0)),
+                             scheduledDueAt: ISODate.string(from: hourDate(values.1)), intervalHours: values.2)
+        })
+        task.intervalHours = interval
+        task.nextDueAt = ISODate.string(from: hourDate(due))
+        return task
+    }
+
+    func testGraceBoundaryRecalculationAndZeroOverride() throws {
+        var task = timedTask(100, [(110, 100, 100)], due: 210)
+        func stats(_ hour: Double, _ grace: Double = 10) -> CompletionStatistics {
+            StatisticsCalculator.calculate(tasks: [task], now: hourDate(hour), globalGrace: grace)
+        }
+        XCTAssertEqual(stats(220).onTimeRate, 1)
+        XCTAssertEqual(stats(220.001).onTimeRate, 0.5)
+        XCTAssertEqual(stats(900).cycleCount, 2)
+        XCTAssertEqual(stats(220, 0).onTimeRate, 0)
+        XCTAssertEqual(stats(220.001, 15).onTimeRate, 1)
+        task.gracePercentage = 0
+        XCTAssertEqual(stats(220, 100).onTimeRate, 0)
+    }
+
+    func testWeightedRateDoesNotDoubleCountOverdueCompletion() throws {
+        let records: [(Double, Double, Double)] = (1...7).map { i in
+            let completed = Double(i) * 24
+            let due = completed - (i == 7 ? 3.0 : 0.0)
+            return (completed, due, 24.0)
+        }
+        var daily = timedTask(24, records)
+        daily.id = "daily"
+        var weekly = timedTask(168, due: 168)
+        let now = hourDate(216)
+        let before = StatisticsCalculator.calculate(tasks: [daily, weekly], now: now)
+        XCTAssertEqual(try XCTUnwrap(before.onTimeRate), 3.0 / 7.0, accuracy: 0.000001)
+        XCTAssertEqual(before.cycleCount, 8)
+        weekly.complete(at: now)
+        let after = StatisticsCalculator.calculate(tasks: [daily, weekly], now: now)
+        XCTAssertEqual(after.onTimeRate, before.onTimeRate)
+        XCTAssertEqual(after.cycleCount, before.cycleCount)
+        XCTAssertEqual(after.overdueCount, 0)
+    }
+
+    func testRealIntervalsUseHistoricalPlansAndExcludeFutureRecords() throws {
+        let task = timedTask(300, [(24, 24, 24), (60, 60, 24), (108, 108, 48), (999, 999, 48)])
+        let stats = StatisticsCalculator.calculate(tasks: [task], now: hourDate(200))
+        let item = try XCTUnwrap(stats.taskRanking.first)
+        XCTAssertEqual(item.total, 3)
+        XCTAssertEqual(item.intervalCount, 2)
+        XCTAssertEqual(item.medianIntervalHours, 42)
+        XCTAssertEqual(item.medianIntervalRatio, 1.25)
+        XCTAssertEqual(item.totalWeight, 96)
+        let single = StatisticsCalculator.calculate(tasks: [timedTask(24, [(24, 24, 24)])], now: hourDate(30))
+        XCTAssertNil(single.taskRanking.first?.medianIntervalHours)
+        XCTAssertNil(StatisticsCalculator.calculate(tasks: [timedTask(24)], now: hourDate(30)).onTimeRate)
+    }
+
+    func testGraceBackupAndRepositoryRoundTrip() throws {
+        var task = timedTask(24)
+        task.gracePercentage = 0
+        let data = try BackupCodec.encode([task], gracePercentage: 15)
+        XCTAssertEqual(BackupCodec.gracePercentage(from: data), 15)
+        XCTAssertEqual(try BackupCodec.decode(data).first?.gracePercentage, 0)
+        XCTAssertEqual(BackupCodec.gracePercentage(from: Data("[]".utf8)), 10)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        try repository.save([task], gracePercentage: 15)
+        XCTAssertEqual(repository.loadGracePercentage(), 15)
+        XCTAssertEqual(repository.load().first?.gracePercentage, 0)
+        XCTAssertNil(StatisticsCalculator.validGrace(-1))
+        XCTAssertNil(StatisticsCalculator.validGrace(.infinity))
     }
 }

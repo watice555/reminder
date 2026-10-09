@@ -27,9 +27,13 @@ enum BackupCodec {
             .filter { seenTaskIDs.insert($0.id).inserted }
     }
 
-    static func encode(_ tasks: [ReminderTask], exportedAt: Date = Date()) throws -> Data {
+    static func gracePercentage(from data: Data) -> Double {
+        (try? JSONDecoder().decode(BackupEnvelope.self, from: data).gracePercentage) ?? 10
+    }
+
+    static func encode(_ tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        return try encoder.encode(BackupEnvelope(tasks: tasks, exportedAt: exportedAt))
+        return try encoder.encode(BackupEnvelope(tasks: tasks, exportedAt: exportedAt, gracePercentage: gracePercentage))
     }
 }
