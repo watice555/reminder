@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StatisticsView: View {
     @EnvironmentObject private var store: ReminderStore
-    @State private var graceText = ""
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingSettings = false
     @State private var showingInfo = false
     @State private var expandedTasks: Set<String> = []
@@ -48,7 +48,7 @@ struct StatisticsView: View {
                                         HStack {
                                             Text(item.name).font(.headline).foregroundStyle(.primary)
                                             Spacer()
-                                            Text(rate(item.onTimeRate)).fontWeight(.semibold)
+                                            Text(rate(item.onTimeRate)).font(.body.weight(.semibold))
                                                 .foregroundStyle(rateColor(item.onTimeRate))
                                             Image(systemName: expandedTasks.contains(item.id) ? "chevron.up" : "chevron.down")
                                                 .font(.caption2).foregroundStyle(.tertiary)
@@ -79,11 +79,10 @@ struct StatisticsView: View {
             .navigationTitle("统计")
             .toolbar {
                 Button("设置") {
-                    graceText = DisplayFormat.number(store.gracePercentage)
                     showingSettings = true
                 }
             }
-            .sheet(isPresented: $showingSettings) { settings }
+            .sheet(isPresented: $showingSettings) { StatisticsSettingsView() }
             .sheet(isPresented: $showingInfo) {
                 NavigationStack {
                     List {
@@ -101,35 +100,7 @@ struct StatisticsView: View {
                         .toolbar { Button("完成") { showingInfo = false } }
                 }
             }
-        }
-    }
-
-    private var settings: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Text("全局宽限")
-                        TextField("10", text: $graceText)
-                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                            .accessibilityLabel("全局宽限百分比")
-                        Text("%")
-                    }
-                } footer: {
-                    Text("允许比计划间隔延迟的比例。任务单独配置优先；保存后重算历史，不改变到期或通知时间。")
-                }
-            }.navigationTitle("统计设置").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("取消") { showingSettings = false } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("保存") {
-                            guard let value = StatisticsCalculator.validGrace(Double(graceText)) else { return }
-                            store.setGracePercentage(value)
-                            showingSettings = false
-                        }.disabled(StatisticsCalculator.validGrace(Double(graceText)) == nil)
-                    }
-                }
-        }
+        }.tint(rateColor(0.9))
     }
 
     private func overdueLabel(_ count: Int) -> some View {
@@ -138,6 +109,15 @@ struct StatisticsView: View {
 
     private func rateColor(_ value: Double?) -> Color {
         guard let value else { return .secondary }
+        if colorScheme == .dark {
+            switch value {
+            case 0.9...: return Color(red: 0.40, green: 0.82, blue: 0.55)
+            case 0.8...: return Color(red: 0.32, green: 0.80, blue: 0.78)
+            case 0.6...: return Color(red: 0.94, green: 0.76, blue: 0.30)
+            case 0.4...: return Color(red: 1.00, green: 0.62, blue: 0.30)
+            default: return Color(red: 1.00, green: 0.48, blue: 0.48)
+            }
+        }
         switch value {
         case 0.9...: return Color(red: 0.13, green: 0.48, blue: 0.28)
         case 0.8...: return Color(red: 0.05, green: 0.48, blue: 0.47)
@@ -157,4 +137,39 @@ struct StatisticsView: View {
             ? "\(DisplayFormat.number(hours / 24)) 天"
             : "\(DisplayFormat.number(hours)) 小时"
     }
+}
+
+private struct StatisticsSettingsView: View {
+    @EnvironmentObject private var store: ReminderStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var graceText = "10"
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("全局宽限")
+                        TextField("10", text: $graceText)
+                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                            .accessibilityLabel("全局宽限百分比")
+                        Text("%")
+                    }
+                } footer: {
+                    Text("允许比计划间隔延迟的比例。任务单独配置优先；保存后重算历史，不改变到期或通知时间。")
+                }
+            }.navigationTitle("统计设置").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") {
+                            guard let value = StatisticsCalculator.validGrace(Double(graceText)) else { return }
+                            store.setGracePercentage(value)
+                            dismiss()
+                        }.disabled(StatisticsCalculator.validGrace(Double(graceText)) == nil)
+                    }
+                }
+        }.onAppear { graceText = DisplayFormat.number(store.gracePercentage) }
+    }
+
 }
