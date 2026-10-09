@@ -45,33 +45,39 @@
       <section class="statistics-view" id="statisticsView" role="tabpanel" aria-labelledby="statisticsViewTab" hidden>
         <section class="statistics-summary" aria-labelledby="statisticsTitle">
           <div class="section-heading">
-            <div>
-              <h2 id="statisticsTitle">统计</h2>
-              <p id="statisticsHint"></p>
-            </div>
+            <h2 id="statisticsTitle">总体准时率</h2>
+            <div><button id="statisticsInfoButton" type="button" aria-label="统计说明">ⓘ</button>
+            <button id="statisticsSettingsButton" type="button">设置</button></div>
           </div>
-          <article class="metric-card">
-            <span>加权准时率</span><strong id="statisticsOnTime">—</strong>
-          </article>
-          <p class="field-hint">全部历史 · 按当前宽限重算。以每个周期当时的计划间隔加权；当前超出宽限的周期计入一次不准时，完成后不重复计数。</p>
+          <article class="metric-card"><strong id="statisticsOnTime">—</strong></article>
+          <p id="statisticsHint" class="field-hint"></p>
         </section>
-        <section class="statistics-panel">
+        <dialog class="task-dialog" id="statisticsSettingsDialog">
+          <h2>统计设置</h2>
           <form id="graceForm">
             <label>全局宽限（%）<input id="globalGraceInput" type="number" min="0" step="any" required value="10" /></label>
             <p class="field-hint">允许比计划间隔延迟的比例。任务单独配置优先；保存后重算历史，不改变到期或通知时间。</p>
-            <button class="primary-button" type="submit">保存宽限</button>
+            <div class="dialog-actions"><button type="button" id="closeStatisticsSettings">取消</button><button class="primary-button" type="submit">保存</button></div>
           </form>
-        </section>
+        </dialog>
+        <dialog class="task-dialog" id="statisticsInfoDialog">
+          <h2>统计说明</h2>
+          <p>在计划到期时间加宽限内完成，算作准时。总体准时率按每个周期当时的计划间隔加权。</p>
+          <p>当前超出宽限的未完成周期计入一次不准时，完成后不重复计数。全部历史按当前宽限重算。</p>
+          <p>间隔取相邻真实完成记录的中位数；计划比取每组实际间隔与当时计划间隔之比的中位数。</p>
+          <p>≥90% 绿色 · 80%–&lt;90% 青绿色 · 60%–&lt;80% 橙黄色 · 40%–&lt;60% 橙色 · &lt;40% 红色；暂无数据为灰色。</p>
+          <button id="closeStatisticsInfo" type="button">完成</button>
+        </dialog>
 
         <section class="statistics-panel" aria-labelledby="rankingTitle">
           <div class="section-heading">
-            <h2 id="rankingTitle">任务概览</h2>
+            <h2 id="rankingTitle">任务概览</h2><span class="field-hint">准时率</span>
           </div>
           <div class="statistics-ranking" id="statisticsRanking"></div>
         </section>
       </section>
 
-      <p class="app-version">v2026.10.09.1</p>
+      <p class="app-version">v2026.10.09.2</p>
     </main>
 
     <dialog class="task-dialog" id="taskDialog">

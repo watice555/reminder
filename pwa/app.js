@@ -111,11 +111,21 @@ function saveGlobalGrace(value) {
 }
 
 function bindEvents() {
+  const settingsDialog = document.querySelector('#statisticsSettingsDialog');
+  const infoDialog = document.querySelector('#statisticsInfoDialog');
+  document.querySelector('#statisticsSettingsButton').addEventListener('click', () => {
+    elements.globalGraceInput.value = globalGrace;
+    settingsDialog.showModal();
+  });
+  document.querySelector('#closeStatisticsSettings').addEventListener('click', () => settingsDialog.close());
+  document.querySelector('#statisticsInfoButton').addEventListener('click', () => infoDialog.showModal());
+  document.querySelector('#closeStatisticsInfo').addEventListener('click', () => infoDialog.close());
   elements.graceForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = ReminderModel.normalizeGrace(Number(elements.globalGraceInput.value));
     if (value === null || !elements.globalGraceInput.value.trim()) return;
     saveGlobalGrace(value);
+    settingsDialog.close();
     renderStatistics(Date.now());
   });
   elements.newTaskButton.addEventListener('click', () => openTaskDialog());
@@ -721,11 +731,23 @@ function bindCompletionButton(button, taskId) {
   });
 }
 
+function punctualityColor(value) {
+  if (value === null) return '#717171';
+  if (value >= 0.9) return '#217a47';
+  if (value >= 0.8) return '#0d7a78';
+  if (value >= 0.6) return '#916605';
+  if (value >= 0.4) return '#b8520f';
+  return '#c23838';
+}
+
 function renderStatistics(now) {
   const statistics = ReminderModel.calculateStatistics(tasks, now, globalGrace);
   const rate = (value) => value === null ? '—' : `${formatNumber(value * 100)}%`;
   elements.statisticsOnTime.textContent = rate(statistics.onTimeRate);
-  elements.statisticsHint.textContent = `基于 ${statistics.cycleCount} 个周期，其中 ${statistics.overdueCount} 个超出宽限未完成`;
+  elements.statisticsOnTime.style.color = punctualityColor(statistics.onTimeRate);
+  elements.statisticsHint.textContent = `全部历史 · ${statistics.cycleCount} 个周期` +
+    (statistics.overdueCount ? ` · ${statistics.overdueCount} 个逾期未完成` : '');
+  const expanded = new Set([...elements.statisticsRanking.querySelectorAll('details[open]')].map(row => row.dataset.taskId));
   elements.statisticsRanking.textContent = '';
   if (!statistics.taskRanking.length) {
     const empty = document.createElement('p');
@@ -734,24 +756,39 @@ function renderStatistics(now) {
     elements.statisticsRanking.append(empty);
   }
   statistics.taskRanking.forEach((item) => {
-    const row = document.createElement('article');
+    const row = document.createElement('details');
     row.className = 'statistics-task';
-    const heading = document.createElement('h3');
-    heading.textContent = item.name;
-    row.append(heading);
-    const lines = [
-      `准时率：${rate(item.onTimeRate)}`,
-      `实际间隔中位数：${item.medianIntervalHours === null ? '—' : formatInterval(item.medianIntervalHours)}`,
-      `实际／计划间隔比：${rate(item.medianIntervalRatio)}`,
-      `${item.cycleCount} 个周期 · ${item.overdueCount} 个超出宽限未完成 · 宽限 ${formatNumber(item.gracePercentage)}%`,
-      item.intervalCount ? `间隔基于 ${item.intervalCount} 组相邻完成记录` : '至少两条真实完成记录才能计算间隔',
-    ];
-    lines.forEach((line, index) => {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = line;
-      if (index >= 3) paragraph.className = 'field-hint';
-      row.append(paragraph);
-    });
+    row.dataset.taskId = item.taskId;
+    row.open = expanded.has(item.taskId);
+    const summary = document.createElement('summary');
+    const heading = document.createElement('span');
+    heading.className = 'statistics-task-heading';
+    const name = document.createElement('strong');
+    name.textContent = item.name;
+    const score = document.createElement('strong');
+    score.textContent = rate(item.onTimeRate);
+    score.style.color = punctualityColor(item.onTimeRate);
+    heading.append(name, score);
+    const metrics = document.createElement('span');
+    metrics.className = 'statistics-task-metrics';
+    const interval = document.createElement('span');
+    interval.textContent = `间隔 ${item.medianIntervalHours === null ? '—' : formatInterval(item.medianIntervalHours)}`;
+    const ratio = document.createElement('span');
+    ratio.textContent = item.medianIntervalRatio === null ? '计划比 —' : `计划的 ${rate(item.medianIntervalRatio)}`;
+    metrics.append(interval, ratio);
+    summary.append(heading, metrics);
+    if (item.overdueCount) {
+      const overdue = document.createElement('span');
+      overdue.className = 'field-hint';
+      overdue.textContent = `${item.overdueCount} 个逾期未完成`;
+      summary.append(overdue);
+    }
+    row.append(summary);
+    const detail = document.createElement('p');
+    detail.className = 'field-hint';
+    detail.textContent = `${item.cycleCount} 个周期 · 宽限 ${formatNumber(item.gracePercentage)}% · ` +
+      (item.intervalCount ? `间隔取中位数 · ${item.intervalCount} 组相邻完成记录` : '至少两条完成记录才能计算间隔');
+    row.append(detail);
     elements.statisticsRanking.append(row);
   });
 }

@@ -605,3 +605,12 @@ textarea {
 .statistics-task p { margin: 8px 0; }
 #graceForm { display: grid; gap: 12px; }
 #graceForm label { display: grid; gap: 8px; }
+
+.statistics-task summary { cursor: pointer; list-style: none; }
+.statistics-task summary::-webkit-details-marker { display: none; }
+.statistics-task-heading, .statistics-task-metrics { display: flex; justify-content: space-between; gap: 12px; }
+.statistics-task-heading { margin-bottom: 8px; }
+.statistics-task-heading::after { content: '⌄'; color: #717171; }
+.statistics-task-heading strong:first-child { margin-right: auto; }
+.statistics-task[open] .statistics-task-heading::after { content: '⌃'; }
+.statistics-task-metrics { color: #717171; font-size: 14px; }
