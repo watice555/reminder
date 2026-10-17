@@ -23,16 +23,6 @@ struct StatisticsView: View {
                 }
                 List {
                     Section {
-                        Picker("统计周期", selection: $periodValue) {
-                            ForEach(StatisticsPeriod.allCases) { Text($0.title).tag($0.rawValue) }
-                        }
-                        if let window = period.window(endingAt: context.date) {
-                            Text("\(window.start.formatted(date: .abbreviated, time: .shortened)) — \(window.end.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Section {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("总体准时率").font(.headline)
@@ -85,10 +75,11 @@ struct StatisticsView: View {
                                         if item.total >= 3 {
                                             HStack {
                                                 Text("平均间隔 \(interval(item.averageIntervalHours))")
-                                                Spacer()
                                                 if let old, let change = intervalChange(item.averageIntervalHours, old.averageIntervalHours) {
-                                                    Text(change)
+                                                    Text(change).font(.caption)
                                                 }
+                                                Spacer(minLength: 4)
+                                                Text(item.medianIntervalRatio.map { "计划比 \(rate($0))" } ?? "计划比 —")
                                             }.font(.subheadline).foregroundStyle(.secondary)
                                         } else {
                                             Text("完成 \(item.total)/3 次，可选择更长周期")
@@ -100,7 +91,6 @@ struct StatisticsView: View {
                                     .accessibilityLabel(item.total >= 3 ? "\(item.name)，准时率 \(rate(item.onTimeRate))" : "\(item.name)，样本不足，完成 \(item.total) 次")
                                     .accessibilityHint(expandedTasks.contains(item.id) ? "收起详情" : "展开详情")
                                 if expandedTasks.contains(item.id) && item.total >= 3 {
-                                    Text(item.medianIntervalRatio.map { "计划比 \(rate($0))" } ?? "计划比 —")
                                     if item.overdueCount > 0 { overdueLabel(item.overdueCount) }
                                     if previous != nil && old == nil { Text("前期样本不足，暂无对比") }
                                     if let old = previous?.taskRanking.first(where: { $0.id == item.id }), old.total >= 3 {
@@ -121,8 +111,19 @@ struct StatisticsView: View {
             }
             .navigationTitle("统计")
             .toolbar {
-                Button("设置") {
-                    showingSettings = true
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Menu {
+                        Picker("统计周期", selection: $periodValue) {
+                            ForEach(StatisticsPeriod.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(period.title)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                    }
+                    .accessibilityLabel("统计周期，\(period.title)")
+                    Button("设置") { showingSettings = true }
                 }
             }
             .sheet(isPresented: $showingSettings) { StatisticsSettingsView() }
