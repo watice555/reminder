@@ -3,6 +3,8 @@ import SwiftUI
 struct StatisticsView: View {
     @EnvironmentObject private var store: ReminderStore
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("statisticsPeriod") private var periodValue = 30
+    private var period: StatisticsPeriod { StatisticsPeriod(rawValue: periodValue) ?? .month }
     @State private var showingSettings = false
     @State private var showingInfo = false
     @State private var expandedTasks: Set<String> = []
@@ -11,9 +13,25 @@ struct StatisticsView: View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 let statistics = StatisticsCalculator.calculate(
-                    tasks: store.tasks, now: context.date, globalGrace: store.gracePercentage
+                    tasks: store.tasks, now: context.date, globalGrace: store.gracePercentage,
+                    window: period.window(endingAt: context.date), minimumCompletions: 3
                 )
+                let previous = period.window(endingAt: context.date.addingTimeInterval(-period.duration)).map {
+                    StatisticsCalculator.calculate(tasks: store.tasks, now: context.date,
+                        globalGrace: store.gracePercentage, window: $0,
+                        includeCurrentOverdue: false, minimumCompletions: 3)
+                }
                 List {
+                    Section {
+                        Picker("统计周期", selection: $periodValue) {
+                            ForEach(StatisticsPeriod.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
+                        if let window = period.window(endingAt: context.date) {
+                            Text("\(window.start.formatted(date: .abbreviated, time: .shortened)) — \(window.end.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -26,8 +44,12 @@ struct StatisticsView: View {
                             Text(rate(statistics.onTimeRate))
                                 .font(.system(size: 40, weight: .bold, design: .rounded))
                                 .foregroundStyle(rateColor(statistics.onTimeRate))
-                            Text("全部历史 · \(statistics.cycleCount) 个周期")
+                            Text("\(period.title) · \(statistics.cycleCount) 个周期 · \(statistics.taskRanking.filter { $0.total >= 3 }.count) 个任务")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if let previous {
+                                Text(rateChange(statistics.onTimeRate, previous.onTimeRate))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             if statistics.overdueCount > 0 {
                                 overdueLabel(statistics.overdueCount)
                             }
@@ -48,26 +70,45 @@ struct StatisticsView: View {
                                         HStack {
                                             Text(item.name).font(.headline).foregroundStyle(.primary)
                                             Spacer()
-                                            Text(rate(item.onTimeRate)).font(.body.weight(.semibold))
-                                                .foregroundStyle(rateColor(item.onTimeRate))
+                                            Text(item.total >= 3 ? rate(item.onTimeRate) : "样本不足").font(.body.weight(.semibold))
+                                                .foregroundStyle(item.total >= 3 ? rateColor(item.onTimeRate) : .secondary)
                                             Image(systemName: expandedTasks.contains(item.id) ? "chevron.up" : "chevron.down")
                                                 .font(.caption2).foregroundStyle(.tertiary)
                                         }
-                                        HStack {
-                                            Text("间隔 \(interval(item.medianIntervalHours))")
-                                            Spacer()
-                                            Text(item.medianIntervalRatio.map { "计划的 \(rate($0))" } ?? "计划比 —")
-                                        }.font(.subheadline).foregroundStyle(.secondary)
+                                        if item.total >= 3 {
+                                            HStack {
+                                                Text("平均间隔 \(interval(item.averageIntervalHours))")
+                                                Spacer()
+                                                Text(item.medianIntervalRatio.map { "计划的 \(rate($0))" } ?? "计划比 —")
+                                            }.font(.subheadline).foregroundStyle(.secondary)
+                                            if let previous {
+                                                let old = previous.taskRanking.first { $0.id == item.id }
+                                                if let old, old.total >= 3 {
+                                                    Text(rateChange(item.onTimeRate, old.onTimeRate))
+                                                    Text(intervalChange(item.averageIntervalHours, old.averageIntervalHours))
+                                                } else {
+                                                    Text("前期完成不足 3 次，暂无对比")
+                                                }
+                                            }
+                                        } else {
+                                            Text("完成 \(item.total)/3 次，可选择更长周期")
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }.contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel("\(item.name)，准时率 \(rate(item.onTimeRate))")
+                                    .disabled(item.total < 3)
+                                    .accessibilityLabel(item.total >= 3 ? "\(item.name)，准时率 \(rate(item.onTimeRate))" : "\(item.name)，样本不足，完成 \(item.total) 次")
                                     .accessibilityHint(expandedTasks.contains(item.id) ? "收起详情" : "展开详情")
-                                if item.overdueCount > 0 { overdueLabel(item.overdueCount) }
-                                if expandedTasks.contains(item.id) {
+                                if item.total >= 3 && item.overdueCount > 0 { overdueLabel(item.overdueCount) }
+                                if expandedTasks.contains(item.id) && item.total >= 3 {
+                                    if let old = previous?.taskRanking.first(where: { $0.id == item.id }), old.total >= 3 {
+                                        Text("前期准时率 \(rate(old.onTimeRate)) · 平均间隔 \(interval(old.averageIntervalHours)) · 完成 \(old.total) 次")
+                                    }
+                                    Text("本期完成 \(item.total) 次")
                                     Text("\(item.cycleCount) 个周期 · 宽限 \(DisplayFormat.number(item.gracePercentage))%")
                                     Text(item.intervalCount == 0
                                          ? "至少两条完成记录才能计算间隔"
-                                         : "间隔取中位数 · \(item.intervalCount) 组相邻完成记录")
+                                         : "间隔取算术平均数 · \(item.intervalCount) 组相邻完成记录")
                                 }
                             }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 6)
                         }
@@ -90,8 +131,13 @@ struct StatisticsView: View {
                             Text("在计划到期时间加宽限内完成，算作准时。总体准时率按每个周期当时的计划间隔加权。")
                             Text("当前超出宽限的未完成周期计入一次不准时，完成后不重复计数。全部历史按当前宽限重算。")
                         }
+                        Section("统计周期") {
+                            Text("近 X 天为精确的 24 × X 小时，前期为紧邻的等长窗口。窗口含起点、不含终点，已完成周期按完成时间归属。")
+                            Text("每个窗口中任务完成至少 3 次才显示指标并纳入总体；前后期都达标才显示任务变化。总体纳入的任务可能不同。")
+                            Text("当前逾期未完成只计入本期，前期不补算历史未完成状态。创建以来仅使用已保存的真实记录。")
+                        }
                         Section("间隔") {
-                            Text("间隔取相邻真实完成记录的中位数；计划比取每组实际间隔与当时计划间隔之比的中位数。")
+                            Text("间隔取相邻真实完成记录的算术平均数，按后一次完成时间归入窗口，可使用窗口之前的完成记录作为起点；计划比取每组实际间隔与当时计划间隔之比的中位数。")
                         }
                         Section("颜色分档") {
                             Text("≥ 90% 绿色 · 80%–<90% 青绿色\n60%–<80% 橙黄色 · 40%–<60% 橙色\n< 40% 红色 · 无数据灰色")
@@ -101,6 +147,20 @@ struct StatisticsView: View {
                 }
             }
         }.tint(rateColor(0.9))
+    }
+
+    private func rateChange(_ current: Double?, _ previous: Double?) -> String {
+        guard let current, let previous else { return "暂无足够数据对比" }
+        let delta = (current - previous) * 100
+        if abs(delta) < 0.05 { return "较前期持平" }
+        return "较前期\(delta > 0 ? "提高" : "下降") \(DisplayFormat.number(abs(delta))) 个百分点"
+    }
+
+    private func intervalChange(_ current: Double?, _ previous: Double?) -> String {
+        guard let current, let previous else { return "暂无间隔对比" }
+        let delta = current - previous
+        if abs(delta) < 1.0 / 60 { return "平均间隔较前期持平" }
+        return "平均间隔较前期\(delta > 0 ? "延长" : "缩短") \(interval(abs(delta)))"
     }
 
     private func overdueLabel(_ count: Int) -> some View {

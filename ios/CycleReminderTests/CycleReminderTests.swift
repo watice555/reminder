@@ -306,12 +306,60 @@ final class CycleReminderTests: XCTestCase {
         let item = try XCTUnwrap(stats.taskRanking.first)
         XCTAssertEqual(item.total, 3)
         XCTAssertEqual(item.intervalCount, 2)
-        XCTAssertEqual(item.medianIntervalHours, 42)
+        XCTAssertEqual(item.averageIntervalHours, 42)
         XCTAssertEqual(item.medianIntervalRatio, 1.25)
         XCTAssertEqual(item.totalWeight, 96)
         let single = StatisticsCalculator.calculate(tasks: [timedTask(24, [(24, 24, 24)])], now: hourDate(30))
-        XCTAssertNil(single.taskRanking.first?.medianIntervalHours)
+        XCTAssertNil(single.taskRanking.first?.averageIntervalHours)
         XCTAssertNil(StatisticsCalculator.calculate(tasks: [timedTask(24)], now: hourDate(30)).onTimeRate)
+    }
+
+    func testAverageIntervalsAndWindowBoundaryAttribution() throws {
+        let task = timedTask(24, [(0, 0, 24), (6, 6, 24), (13, 13, 24), (33, 33, 24), (40, 40, 24)])
+        let all = StatisticsCalculator.calculate(tasks: [task], now: hourDate(34))
+        XCTAssertEqual(try XCTUnwrap(all.taskRanking.first?.averageIntervalHours), 11, accuracy: 0.000001)
+        let window = DateInterval(start: hourDate(13), end: hourDate(40))
+        let result = StatisticsCalculator.calculate(tasks: [task], now: hourDate(50), window: window,
+                                                   includeCurrentOverdue: false)
+        let item = try XCTUnwrap(result.taskRanking.first)
+        XCTAssertEqual(item.total, 2)
+        XCTAssertEqual(item.intervalCount, 2)
+        XCTAssertEqual(item.averageIntervalHours, 13.5) // (7 + 20) / 2; first anchor is outside window.
+        let previous = StatisticsCalculator.calculate(tasks: [task], now: hourDate(50),
+            window: DateInterval(start: hourDate(-14), end: hourDate(13)), includeCurrentOverdue: false)
+        XCTAssertEqual(previous.total, 2) // Completion at 13 belongs only to current window.
+    }
+
+    func testWindowMinimumSamplesAndCurrentOverdue() throws {
+        var enough = timedTask(10, [(10, 10, 10), (20, 20, 10), (30, 30, 10)], due: 40)
+        enough.id = "enough"
+        var sparse = timedTask(100, [(15, 15, 100), (25, 25, 100)], due: 35)
+        sparse.id = "sparse"
+        let window = DateInterval(start: hourDate(0), end: hourDate(100))
+        let current = StatisticsCalculator.calculate(tasks: [enough, sparse], now: hourDate(100),
+            window: window, minimumCompletions: 3)
+        XCTAssertEqual(current.onTimeRate, 0.75)
+        XCTAssertEqual(current.cycleCount, 4)
+        XCTAssertEqual(current.overdueCount, 1)
+        XCTAssertEqual(current.taskRanking.count, 2) // Sparse task remains available for its placeholder.
+        let previous = StatisticsCalculator.calculate(tasks: [enough, sparse], now: hourDate(100),
+            window: window, includeCurrentOverdue: false, minimumCompletions: 3)
+        XCTAssertEqual(previous.onTimeRate, 1)
+        XCTAssertEqual(previous.overdueCount, 0)
+        XCTAssertNil(StatisticsCalculator.calculate(tasks: [sparse], now: hourDate(100),
+            window: window, minimumCompletions: 3).onTimeRate)
+    }
+
+    func testRollingPeriodsUseExactHoursAcrossDaylightSaving() throws {
+        let end = try XCTUnwrap(ISODate.parse("2026-03-10T12:34:56Z"))
+        for period in [StatisticsPeriod.week, .month, .quarter] {
+            let current = try XCTUnwrap(period.window(endingAt: end))
+            let previous = try XCTUnwrap(period.window(endingAt: current.start))
+            XCTAssertEqual(current.duration, Double(period.rawValue) * 24 * 3600)
+            XCTAssertEqual(previous.end, current.start)
+            XCTAssertEqual(previous.duration, current.duration)
+        }
+        XCTAssertNil(StatisticsPeriod.all.window(endingAt: end))
     }
 
     func testGraceBackupAndRepositoryRoundTrip() throws {

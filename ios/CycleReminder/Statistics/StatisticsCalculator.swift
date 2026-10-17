@@ -18,7 +18,7 @@ struct TaskCompletionRanking: Identifiable, Equatable {
     let onTimeCount: Int
     let onTimeWeight: Double
     let totalWeight: Double
-    let medianIntervalHours: Double?
+    let averageIntervalHours: Double?
     let medianIntervalRatio: Double?
     let intervalCount: Int
     let gracePercentage: Double
@@ -38,7 +38,21 @@ struct CompletionStatistics: Equatable {
     let taskRanking: [TaskCompletionRanking]
 }
 
+enum StatisticsPeriod: Int, CaseIterable, Identifiable {
+    case all = 0, week = 7, month = 30, quarter = 90
+    var id: Int { rawValue }
+    var title: String { self == .all ? "创建以来" : "近 \(rawValue) 天" }
+    var duration: TimeInterval { Double(rawValue) * 24 * 3600 }
+    func window(endingAt end: Date) -> DateInterval? {
+        self == .all ? nil : DateInterval(start: end.addingTimeInterval(-duration), end: end)
+    }
+}
+
 enum StatisticsCalculator {
+    static func average(_ values: [Double]) -> Double? {
+        values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+
     static func validGrace(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value >= 0 else { return nil }
         return value
@@ -55,8 +69,15 @@ enum StatisticsCalculator {
         tasks: [ReminderTask],
         now: Date = Date(),
         calendar: Calendar = .current,
-        globalGrace: Double = 10
+        globalGrace: Double = 10,
+        window: DateInterval? = nil,
+        includeCurrentOverdue: Bool = true,
+        minimumCompletions: Int = 0
     ) -> CompletionStatistics {
+        func inWindow(_ date: Date) -> Bool {
+            guard let window else { return date <= now }
+            return date >= window.start && date < window.end && date <= now
+        }
         let todayStart = calendar.startOfDay(for: now)
         let sevenDayStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
         let completions = tasks
@@ -65,7 +86,7 @@ enum StatisticsCalculator {
                 guard
                     let completedAt = record.completedDate,
                     let dueAt = record.scheduledDueDate,
-                    completedAt <= now
+                    inWindow(completedAt)
                 else {
                     return nil
                 }
@@ -82,20 +103,22 @@ enum StatisticsCalculator {
 
         let taskRanking = tasks.map { task -> TaskCompletionRanking in
             let grace = validGrace(task.gracePercentage) ?? validGrace(globalGrace) ?? 10
-            let valid = task.completions.compactMap { $0.normalized() }.filter {
+            let history = task.completions.compactMap { $0.normalized() }.filter {
                 ($0.completedDate ?? .distantFuture) <= now
             }.sorted { $0.completedDate! < $1.completedDate! }
+            let valid = history.filter { inWindow($0.completedDate!) }
             let onTime = valid.filter {
                 $0.completedDate! <= $0.scheduledDueDate!.addingTimeInterval($0.intervalHours * 3600 * grace / 100)
             }
-            let overdue = task.nextDueDate.map {
+            let overdue = includeCurrentOverdue && (task.nextDueDate.map {
                 now > $0.addingTimeInterval(task.intervalHours * 3600 * grace / 100)
-            } ?? false
+            } ?? false)
             let cycleCount = valid.count + (overdue ? 1 : 0)
-            let intervals = zip(valid, valid.dropFirst()).map {
+            let pairs = zip(history, history.dropFirst()).filter { inWindow($0.1.completedDate!) }
+            let intervals = pairs.map {
                 $1.completedDate!.timeIntervalSince($0.completedDate!) / 3600
             }
-            let ratios = zip(intervals, valid.dropFirst()).map { $0 / $1.intervalHours }
+            let ratios = zip(intervals, pairs).map { $0 / $1.1.intervalHours }
             return TaskCompletionRanking(
                 taskID: task.id, name: task.name, total: valid.count,
                 onTimeRate: cycleCount == 0 ? nil : Double(onTime.count) / Double(cycleCount),
@@ -104,20 +127,21 @@ enum StatisticsCalculator {
                 onTimeCount: onTime.count,
                 onTimeWeight: onTime.reduce(0) { $0 + $1.intervalHours },
                 totalWeight: valid.reduce(0) { $0 + $1.intervalHours } + (overdue ? task.intervalHours : 0),
-                medianIntervalHours: median(intervals), medianIntervalRatio: median(ratios),
+                averageIntervalHours: average(intervals), medianIntervalRatio: median(ratios),
                 intervalCount: intervals.count, gracePercentage: grace
             )
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        let weight = taskRanking.reduce(0) { $0 + $1.totalWeight }
-        let onTimeWeight = taskRanking.reduce(0) { $0 + $1.onTimeWeight }
+        let eligible = taskRanking.filter { $0.total >= minimumCompletions }
+        let weight = eligible.reduce(0) { $0 + $1.totalWeight }
+        let onTimeWeight = eligible.reduce(0) { $0 + $1.onTimeWeight }
 
         return CompletionStatistics(
-            cycleCount: taskRanking.reduce(0) { $0 + $1.cycleCount },
-            overdueCount: taskRanking.reduce(0) { $0 + $1.overdueCount },
+            cycleCount: eligible.reduce(0) { $0 + $1.cycleCount },
+            overdueCount: eligible.reduce(0) { $0 + $1.overdueCount },
             today: today,
             lastSevenDays: recent.count,
             total: completions.count,
-            onTimeCount: taskRanking.reduce(0) { $0 + $1.onTimeCount },
+            onTimeCount: eligible.reduce(0) { $0 + $1.onTimeCount },
             onTimeRate: weight == 0 ? nil : onTimeWeight / weight,
             daily: daily,
             taskRanking: taskRanking
