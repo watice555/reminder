@@ -135,7 +135,7 @@ struct StatisticsView: View {
                             Text("当前超出宽限的未完成周期计入一次不准时，完成后不重复计数。全部历史按当前宽限重算。")
                         }
                         Section("统计周期") {
-                            Text("↑ / ↓ 表示相较前期的数值增减，→ 表示持平；准时率变化单位为百分点，间隔变化单位为天或小时。无可比数据时不显示箭头。")
+                            Text("↑ / ↓ 表示相较前期的数值增减，→ 表示持平；准时率变化单位 pp 表示百分点（percentage points），间隔变化单位为天或小时。无可比数据时不显示箭头。")
                             Text("近 X 天为精确的 24 × X 小时，前期为紧邻的等长窗口。窗口含起点、不含终点，已完成周期按完成时间归属。")
                             Text("每个窗口中任务完成至少 3 次才显示指标并纳入总体；前后期都达标才显示任务变化。总体纳入的任务可能不同。")
                             Text("当前逾期未完成只计入本期，前期不补算历史未完成状态。创建以来仅使用已保存的真实记录。")
@@ -156,8 +156,8 @@ struct StatisticsView: View {
     private func rateChange(_ current: Double?, _ previous: Double?) -> String? {
         guard let current, let previous else { return nil }
         let delta = (current - previous) * 100
-        if abs(delta) < 0.05 { return "→ 0 个百分点" }
-        return "\(delta > 0 ? "↑" : "↓") \(DisplayFormat.number(abs(delta))) 个百分点"
+        if abs(delta) < 0.05 { return "→ 0 pp" }
+        return "\(delta > 0 ? "↑" : "↓") \(DisplayFormat.number(abs(delta))) pp"
     }
 
     private func intervalChange(_ current: Double?, _ previous: Double?) -> String? {
