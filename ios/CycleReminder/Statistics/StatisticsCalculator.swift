@@ -101,7 +101,12 @@ enum StatisticsCalculator {
             return DailyCompletion(date: date, count: count)
         }
 
-        let taskRanking = tasks.map { task -> TaskCompletionRanking in
+        let taskRanking = tasks.sorted {
+            if $0.intervalHours != $1.intervalHours { return $0.intervalHours < $1.intervalHours }
+            let nameOrder = $0.name.localizedStandardCompare($1.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return $0.id < $1.id
+        }.map { task -> TaskCompletionRanking in
             let grace = validGrace(task.gracePercentage) ?? validGrace(globalGrace) ?? 10
             let history = task.completions.compactMap { $0.normalized() }.filter {
                 ($0.completedDate ?? .distantFuture) <= now
@@ -130,7 +135,7 @@ enum StatisticsCalculator {
                 averageIntervalHours: average(intervals), medianIntervalRatio: median(ratios),
                 intervalCount: intervals.count, gracePercentage: grace
             )
-        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
         let eligible = taskRanking.filter { $0.total >= minimumCompletions }
         let weight = eligible.reduce(0) { $0 + $1.totalWeight }
         let onTimeWeight = eligible.reduce(0) { $0 + $1.onTimeWeight }
