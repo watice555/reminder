@@ -238,11 +238,13 @@ final class WebDAVClient {
         var trace: [String] = []
         var cleanupURLs: [URL] = []
         var failure: String?
+        var lastResponseBody = Data()
 
         func send(_ label: String, _ method: String, to target: URL, body: Data? = nil,
                   headers: [String: String] = [:]) async throws -> HTTPURLResponse {
             do {
-                let (_, response) = try await request(method, url: target, body: body, headers: headers)
+                let (data, response) = try await request(method, url: target, body: body, headers: headers)
+                lastResponseBody = data
                 var line = "\(label)：HTTP \(response.statusCode)"
                 // Only include numeric retry delays, never arbitrary server headers or response bodies.
                 if let value = response.value(forHTTPHeaderField: "Retry-After"),
@@ -278,6 +280,11 @@ final class WebDAVClient {
             }
             throw WebDAVError.message("\(step)：\(reason)（HTTP \(response.statusCode)）。尚不能确认条件写入能力。")
         }
+        func readProbe(_ label: String, at target: URL) async throws -> Data {
+            let response = try await send(label, "GET", to: target)
+            try checkProbe(response, allowed: [200], step: label)
+            return lastResponseBody
+        }
         do {
             let directory = try await send("准备目录", "MKCOL", to: settings.baseURL())
             try checkProbe(directory, allowed: [201, 405], step: "准备目录")
@@ -304,16 +311,28 @@ final class WebDAVClient {
                 cleanupURLs.append(source)
                 let staged = try await send("创建移动测试源", "PUT", to: source, body: Data("move-probe".utf8))
                 try checkProbe(staged, allowed: [201], step: "创建移动测试源")
+                let destinationBefore = try await readProbe("读取移动前目标内容", at: url)
                 let refused = try await send("禁止移动覆盖已有文件", "MOVE", to: source,
                     headers: ["Destination": url.absoluteString, "Overwrite": "F"])
-                guard refused.statusCode == 412 else {
+                guard [409, 412].contains(refused.statusCode) else {
                     try checkProbe(refused, allowed: Set(200...299), step: "移动防覆盖检查")
                     throw WebDAVError.message("服务器忽略 MOVE 的禁止覆盖条件（HTTP \(refused.statusCode)，预期 412），不能安全创建同步文件。正式任务文件未写入。")
                 }
+                let destinationAfter = try await readProbe("核验已有目标未被覆盖", at: url)
+                let sourceAfter = try await readProbe("核验移动源仍然存在", at: source)
+                guard destinationBefore == destinationAfter, sourceAfter == Data("move-probe".utf8) else {
+                    throw WebDAVError.message("服务器报告移动冲突，但测试文件内容发生变化，防覆盖验证失败。正式任务文件未写入。")
+                }
+                trace.append("冲突后内容核验通过：目标未变，源文件保留")
                 cleanupURLs.append(target)
                 let moved = try await send("移动到不存在的目标", "MOVE", to: source,
                     headers: ["Destination": target.absoluteString, "Overwrite": "F"])
                 try checkProbe(moved, allowed: [201], step: "移动创建检查")
+                let movedBody = try await readProbe("核验新目标内容", at: target)
+                let oldSource = try await send("核验移动源已移除", "GET", to: source)
+                guard movedBody == Data("move-probe".utf8), oldSource.statusCode == 404 else {
+                    throw WebDAVError.message("移动成功响应与实际文件状态不一致，已停止同步。")
+                }
                 fallbackPassed = true
             }
         } catch { failure = error.localizedDescription }

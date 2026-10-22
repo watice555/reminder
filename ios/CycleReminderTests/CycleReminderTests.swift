@@ -683,52 +683,91 @@ final class WebDAVSyncTests: XCTestCase {
         }
     }
 
-    func testNutstoreStyleCreationUsesVerifiedMoveAndPreservesRaceWinner() async throws {
-        for race in [false, true] {
-            var probePuts = 0, probeMoves = 0
-            var destinations: [String] = []
-            WebDAVStubProtocol.handler = { request in
-                let name = request.url!.lastPathComponent
-                if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
-                if request.httpMethod == "DELETE" {
-                    XCTAssertNotEqual(name, "sync-v1.json")
-                    return (204, [:], Data())
+    private func installMoveServer(conflictStatus: Int = 409, race: Bool = false,
+                                   corruptOnConflict: Bool = false, rejectNewTarget: Bool = false,
+                                   falseSuccess: Bool = false) {
+        var files: [String: Data] = [:]
+        WebDAVStubProtocol.handler = { request in
+            let path = request.url!.path
+            switch request.httpMethod {
+            case "MKCOL": return (201, [:], Data())
+            case "GET":
+                return (files[path] == nil ? 404 : 200, [:], files[path] ?? Data())
+            case "DELETE":
+                XCTAssertFalse(path.hasSuffix("sync-v1.json"))
+                files.removeValue(forKey: path)
+                return (204, [:], Data())
+            case "PUT":
+                XCTAssertFalse(path.hasSuffix("sync-v1.json"), "must not PUT shared destination")
+                if request.value(forHTTPHeaderField: "If-Match") != nil { return (412, [:], Data()) }
+                let existed = files[path] != nil
+                var data = request.httpBody ?? Data()
+                if let stream = request.httpBodyStream {
+                    stream.open()
+                    defer { stream.close() }
+                    var buffer = [UInt8](repeating: 0, count: 4096)
+                    while true {
+                        let count = stream.read(&buffer, maxLength: buffer.count)
+                        if count <= 0 { break }
+                        data.append(contentsOf: buffer.prefix(count))
+                    }
                 }
-                if request.httpMethod == "MOVE" {
-                    XCTAssertEqual(request.value(forHTTPHeaderField: "Overwrite"), "F")
-                    let target = request.value(forHTTPHeaderField: "Destination")!
-                    destinations.append(target)
-                    if target.hasSuffix("sync-v1.json") { return (race ? 412 : 201, [:], Data()) }
-                    probeMoves += 1
-                    return (probeMoves == 1 ? 412 : 201, [:], Data())
+                files[path] = data
+                return (existed ? 204 : 201, [:], Data())
+            case "MOVE":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Overwrite"), "F")
+                let target = URL(string: request.value(forHTTPHeaderField: "Destination")!)!.path
+                if race && target.hasSuffix("sync-v1.json") { files[target] = Data("winner".utf8) }
+                if files[target] != nil {
+                    if corruptOnConflict { files[target] = Data("damaged".utf8) }
+                    return (conflictStatus, [:], Data())
                 }
-                XCTAssertNotEqual(name, "sync-v1.json", "never PUT the shared file on fallback creation")
-                if name.hasPrefix("upload-") || name.hasPrefix("probe-move-") { return (201, [:], Data()) }
-                probePuts += 1
-                return (probePuts == 1 ? 201 : (probePuts == 2 ? 204 : 412), [:], Data())
+                if rejectNewTarget { return (409, [:], Data()) }
+                if !falseSuccess {
+                    files[target] = files.removeValue(forKey: path)
+                }
+                return (201, [:], Data())
+            default: XCTFail("unexpected method"); return (500, [:], Data())
             }
-            let service = client()
-            let report = try await service.testWriteSafety()
-            XCTAssertTrue(report.contains("MOVE + Overwrite: F"))
-            do {
-                try await service.write(snapshot([task()]), replacing: WebDAVRemote(snapshot: nil, etag: nil))
-                XCTAssertFalse(race)
-            } catch { XCTAssertTrue(race) }
-            XCTAssertEqual(destinations.count, 3)
+        }
+    }
+
+    func testNutstoreStyleCreationUsesVerifiedMoveAndPreservesRaceWinner() async throws {
+        for conflictStatus in [409, 412] {
+            for race in [false, true] {
+                installMoveServer(conflictStatus: conflictStatus, race: race)
+                let service = client()
+                let report = try await service.testWriteSafety()
+                XCTAssertTrue(report.contains("冲突后内容核验通过"))
+                do {
+                    try await service.write(snapshot([task()]), replacing: WebDAVRemote(snapshot: nil, etag: nil))
+                    XCTAssertFalse(race)
+                } catch { XCTAssertTrue(race) }
+                if race {
+                    // Inspect through the stub to verify the failed create didn't overwrite/delete the winner.
+                    let (_, _, body) = try await WebDAVStubProtocol.handler!(URLRequest(url: URL(string: "https://dav.example/dav/CycleReminder/sync-v1.json")!))
+                    XCTAssertEqual(body, Data("winner".utf8))
+                }
+            }
         }
     }
 
     func testUnsafeMoveFallbackIsRejected() async throws {
-        var puts = 0
-        WebDAVStubProtocol.handler = { request in
-            if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
-            if request.httpMethod == "DELETE" { return (204, [:], Data()) }
-            if request.httpMethod == "MOVE" { return (204, [:], Data()) }
-            puts += 1
-            return (puts == 3 ? 412 : 201, [:], Data())
-        }
+        installMoveServer(conflictStatus: 204)
         do { try await client().testWriteSafety(); XCTFail("must reject unsafe MOVE") }
         catch { XCTAssertTrue(error.localizedDescription.contains("忽略 MOVE")) }
+    }
+
+    func testMove409CannotPassWithDamagedContentOrUnrelatedConflict() async throws {
+        installMoveServer(corruptOnConflict: true)
+        do { try await client().testWriteSafety(); XCTFail("must reject changed target") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("内容发生变化")) }
+        installMoveServer(rejectNewTarget: true)
+        do { try await client().testWriteSafety(); XCTFail("must reject conflict on absent target") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("移动创建检查")) }
+        installMoveServer(falseSuccess: true)
+        do { try await client().testWriteSafety(); XCTFail("must verify successful move actually happened") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("核验新目标内容")) }
     }
 
     func testSafetyProbeAcceptsConditionalServer() async throws {
