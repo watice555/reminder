@@ -651,13 +651,13 @@ final class WebDAVSyncTests: XCTestCase {
             if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
             if request.httpMethod == "DELETE" { deletes += 1; return (503, [:], Data()) }
             puts += 1
-            return (puts == 3 ? 412 : 201, [:], Data())
+            return (201, [:], Data())
         }
         do { try await client().testWriteSafety(); XCTFail("must fail") }
         catch {
             let message = error.localizedDescription
             XCTAssertTrue(message.contains("If-None-Match 返回 HTTP 201"))
-            XCTAssertTrue(message.contains("If-Match）：HTTP 412"))
+            XCTAssertTrue(message.contains("If-Match）：HTTP 201"))
             XCTAssertTrue(message.contains("清理测试文件：HTTP 503"))
             XCTAssertTrue(message.contains("临时文件清理未完成"))
             XCTAssertTrue(message.contains("正式任务文件未写入"))
@@ -681,6 +681,54 @@ final class WebDAVSyncTests: XCTestCase {
             XCTAssertFalse(error.localizedDescription.contains("private-url-and-password"))
             XCTAssertFalse(error.localizedDescription.contains("接受了应被拒绝"))
         }
+    }
+
+    func testNutstoreStyleCreationUsesVerifiedMoveAndPreservesRaceWinner() async throws {
+        for race in [false, true] {
+            var probePuts = 0, probeMoves = 0
+            var destinations: [String] = []
+            WebDAVStubProtocol.handler = { request in
+                let name = request.url!.lastPathComponent
+                if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+                if request.httpMethod == "DELETE" {
+                    XCTAssertNotEqual(name, "sync-v1.json")
+                    return (204, [:], Data())
+                }
+                if request.httpMethod == "MOVE" {
+                    XCTAssertEqual(request.value(forHTTPHeaderField: "Overwrite"), "F")
+                    let target = request.value(forHTTPHeaderField: "Destination")!
+                    destinations.append(target)
+                    if target.hasSuffix("sync-v1.json") { return (race ? 412 : 201, [:], Data()) }
+                    probeMoves += 1
+                    return (probeMoves == 1 ? 412 : 201, [:], Data())
+                }
+                XCTAssertNotEqual(name, "sync-v1.json", "never PUT the shared file on fallback creation")
+                if name.hasPrefix("upload-") || name.hasPrefix("probe-move-") { return (201, [:], Data()) }
+                probePuts += 1
+                return (probePuts == 1 ? 201 : (probePuts == 2 ? 204 : 412), [:], Data())
+            }
+            let service = client()
+            let report = try await service.testWriteSafety()
+            XCTAssertTrue(report.contains("MOVE + Overwrite: F"))
+            do {
+                try await service.write(snapshot([task()]), replacing: WebDAVRemote(snapshot: nil, etag: nil))
+                XCTAssertFalse(race)
+            } catch { XCTAssertTrue(race) }
+            XCTAssertEqual(destinations.count, 3)
+        }
+    }
+
+    func testUnsafeMoveFallbackIsRejected() async throws {
+        var puts = 0
+        WebDAVStubProtocol.handler = { request in
+            if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+            if request.httpMethod == "DELETE" { return (204, [:], Data()) }
+            if request.httpMethod == "MOVE" { return (204, [:], Data()) }
+            puts += 1
+            return (puts == 3 ? 412 : 201, [:], Data())
+        }
+        do { try await client().testWriteSafety(); XCTFail("must reject unsafe MOVE") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("忽略 MOVE")) }
     }
 
     func testSafetyProbeAcceptsConditionalServer() async throws {
