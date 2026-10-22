@@ -211,24 +211,85 @@ final class WebDAVClient {
         let (_, response) = try await request("PUT", url: settings.baseURL().appendingPathComponent("sync-v1.json"), body: snapshot.encoded(), headers: headers)
         try check(response, allowed: [200, 201, 204])
     }
-    // Validate conditional writes using a disposable file, never the user's sync file.
-    func testWriteSafety() async throws {
-        try await prepareDirectory()
+    // Use different bytes for each PUT: a repeated identical write can hide an ignored condition.
+    @discardableResult
+    func testWriteSafety() async throws -> String {
         let url = try settings.baseURL().appendingPathComponent("probe-\(UUID().uuidString).txt")
-        let body = Data("CycleReminder connection test".utf8)
-        let (_, created) = try await request("PUT", url: url, body: body, headers: ["If-None-Match": "*"])
-        try check(created, allowed: [200, 201, 204])
-        do {
-            let (_, duplicate) = try await request("PUT", url: url, body: body, headers: ["If-None-Match": "*"])
-            let (_, mismatch) = try await request("PUT", url: url, body: body, headers: ["If-Match": "\"nonexistent-\(UUID().uuidString)\""])
-            guard duplicate.statusCode == 412, mismatch.statusCode == 412 else {
-                throw WebDAVError.message("服务器不支持安全的条件写入，已停止同步以避免覆盖。")
+        var trace: [String] = []
+        var created = false
+        var failure: String?
+
+        func send(_ label: String, _ method: String, to target: URL, body: Data? = nil,
+                  headers: [String: String] = [:]) async throws -> HTTPURLResponse {
+            do {
+                let (_, response) = try await request(method, url: target, body: body, headers: headers)
+                var line = "\(label)：HTTP \(response.statusCode)"
+                // Only include numeric retry delays, never arbitrary server headers or response bodies.
+                if let value = response.value(forHTTPHeaderField: "Retry-After"),
+                   let seconds = Int(value), seconds >= 0 {
+                    line += "（建议 \(seconds) 秒后重试）"
+                }
+                trace.append(line)
+                return response
+            } catch {
+                let detail: String
+                if let error = error as? URLError {
+                    switch error.code {
+                    case .timedOut: detail = "网络超时"
+                    case .notConnectedToInternet: detail = "设备离线"
+                    case .cancelled: detail = "请求取消"
+                    default: detail = "网络错误（\(error.code.rawValue)）"
+                    }
+                } else { detail = "请求未取得有效响应" }
+                trace.append("\(label)：\(detail)")
+                throw WebDAVError.message("\(label)失败：\(detail)。尚不能判断服务器是否支持条件写入。")
             }
-            let (_, removed) = try await request("DELETE", url: url)
-            try check(removed, allowed: [200, 204, 404])
-        } catch {
-            _ = try? await request("DELETE", url: url)
-            throw error
         }
+        func checkProbe(_ response: HTTPURLResponse, allowed: Set<Int>, step: String) throws {
+            guard !allowed.contains(response.statusCode) else { return }
+            let reason: String
+            switch response.statusCode {
+            case 401, 403: reason = "认证或权限不足，请检查应用密码和目录权限"
+            case 429: reason = "服务器限流，请等待后重试"
+            case 500...599: reason = "服务器暂时异常，请稍后重试"
+            case 300...399: reason = "服务器要求重定向，请检查最终 HTTPS 地址"
+            case 404, 409: reason = "测试文件或目录不可用，请稍后重试"
+            default: reason = "服务器返回非预期响应"
+            }
+            throw WebDAVError.message("\(step)：\(reason)（HTTP \(response.statusCode)）。尚不能确认条件写入能力。")
+        }
+        do {
+            let directory = try await send("准备目录", "MKCOL", to: settings.baseURL())
+            try checkProbe(directory, allowed: [201, 405], step: "准备目录")
+            let initial = try await send("创建测试文件", "PUT", to: url, body: Data("initial".utf8),
+                                         headers: ["If-None-Match": "*", "Content-Type": "text/plain"])
+            try checkProbe(initial, allowed: [200, 201, 204], step: "创建测试文件")
+            created = true
+            let duplicate = try await send("防止重复创建（If-None-Match）", "PUT", to: url,
+                                           body: Data("must-not-replace-initial".utf8), headers: ["If-None-Match": "*"])
+            try checkProbe(duplicate, allowed: Set(200...299).union([412]), step: "防止重复创建检查")
+            let mismatch = try await send("拒绝错误版本（If-Match）", "PUT", to: url,
+                                          body: Data("must-not-replace-with-wrong-version".utf8),
+                                          headers: ["If-Match": "\"nonexistent-\(UUID().uuidString)\""])
+            try checkProbe(mismatch, allowed: Set(200...299).union([412]), step: "错误版本检查")
+            guard duplicate.statusCode == 412, mismatch.statusCode == 412 else {
+                let ignored = [("If-None-Match", duplicate.statusCode), ("If-Match", mismatch.statusCode)]
+                    .filter { $0.1 != 412 }.map { "\($0.0) 返回 HTTP \($0.1)" }.joined(separator: "；")
+                throw WebDAVError.message("服务器接受了应被拒绝的测试写入（\(ignored)，预期 412）。当前服务未通过防覆盖检查，已停止同步。正式任务文件未写入。")
+            }
+        } catch { failure = error.localizedDescription }
+
+        if created {
+            do {
+                let removed = try await send("清理测试文件", "DELETE", to: url)
+                try checkProbe(removed, allowed: [200, 204, 404], step: "清理测试文件")
+            } catch {
+                let cleanup = "临时文件清理未完成：\(url.lastPathComponent)。可稍后在坚果云 CycleReminder 目录删除此测试文件。"
+                failure = [failure, cleanup].compactMap { $0 }.joined(separator: "\n")
+            }
+        }
+        let report = "检查记录：\n" + trace.joined(separator: "\n")
+        if let failure { throw WebDAVError.message(failure + "\n\n" + report) }
+        return report
     }
 }

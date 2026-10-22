@@ -620,6 +620,69 @@ final class WebDAVSyncTests: XCTestCase {
         XCTAssertEqual(store.syncStatus, "同步成功")
     }
 
+    func testProbeDistinguishesRateLimitPermissionAndServerErrors() async throws {
+        for (status, expected) in [(429, "限流"), (403, "权限"), (503, "暂时异常")] {
+            var puts = 0
+            var deleted = false
+            WebDAVStubProtocol.handler = { request in
+                if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+                if request.httpMethod == "DELETE" { deleted = true; return (204, [:], Data()) }
+                puts += 1
+                return (puts == 1 ? 201 : status, ["Retry-After": "60", "X-Private": "do-not-display"], Data("private response".utf8))
+            }
+            do { try await client().testWriteSafety(); XCTFail("must fail") }
+            catch {
+                let message = error.localizedDescription
+                XCTAssertTrue(message.contains(expected))
+                XCTAssertTrue(message.contains("HTTP \(status)"))
+                XCTAssertTrue(message.contains("60 秒"))
+                XCTAssertFalse(message.contains("接受了应被拒绝"))
+                XCTAssertFalse(message.contains("private response"))
+                XCTAssertFalse(message.contains("do-not-display"))
+            }
+            XCTAssertEqual(puts, 2, "stop further probes after a transient/auth error")
+            XCTAssertTrue(deleted)
+        }
+    }
+
+    func testProbePreservesFailureAndCleanupDiagnostics() async throws {
+        var puts = 0, deletes = 0
+        WebDAVStubProtocol.handler = { request in
+            if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+            if request.httpMethod == "DELETE" { deletes += 1; return (503, [:], Data()) }
+            puts += 1
+            return (puts == 3 ? 412 : 201, [:], Data())
+        }
+        do { try await client().testWriteSafety(); XCTFail("must fail") }
+        catch {
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("If-None-Match 返回 HTTP 201"))
+            XCTAssertTrue(message.contains("If-Match）：HTTP 412"))
+            XCTAssertTrue(message.contains("清理测试文件：HTTP 503"))
+            XCTAssertTrue(message.contains("临时文件清理未完成"))
+            XCTAssertTrue(message.contains("正式任务文件未写入"))
+        }
+        XCTAssertEqual(deletes, 1, "do not immediately retry failed cleanup")
+    }
+
+    func testProbeTimeoutReportsStageWithoutLeakingURL() async throws {
+        var puts = 0
+        WebDAVStubProtocol.handler = { request in
+            if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+            if request.httpMethod == "DELETE" { return (204, [:], Data()) }
+            puts += 1
+            if puts > 1 { throw URLError(.timedOut, userInfo: [NSLocalizedDescriptionKey: "private-url-and-password"]) }
+            return (201, [:], Data())
+        }
+        do { try await client().testWriteSafety(); XCTFail("must fail") }
+        catch {
+            XCTAssertTrue(error.localizedDescription.contains("网络超时"))
+            XCTAssertTrue(error.localizedDescription.contains("If-None-Match"))
+            XCTAssertFalse(error.localizedDescription.contains("private-url-and-password"))
+            XCTAssertFalse(error.localizedDescription.contains("接受了应被拒绝"))
+        }
+    }
+
     func testSafetyProbeAcceptsConditionalServer() async throws {
         var puts = 0
         WebDAVStubProtocol.handler = { request in

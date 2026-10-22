@@ -41,7 +41,7 @@ struct WebDAVSettingsView: View {
                 .disabled(hasUnsavedChanges || store.webDAVSettings == nil)
                 Section("同步状态") {
                     if store.isSyncing { ProgressView() }
-                    Text(store.syncStatus)
+                    Text(store.syncStatus).textSelection(.enabled)
                     if let date = store.lastSyncedAt {
                         Text("上次成功：\(DisplayFormat.dateTime(date))").foregroundStyle(.secondary)
                     }

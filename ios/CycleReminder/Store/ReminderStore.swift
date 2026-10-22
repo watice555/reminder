@@ -205,8 +205,8 @@ final class ReminderStore: ObservableObject {
         defer { isSyncing = false }
         do {
             let client = makeWebDAVClient(settings)
-            try await client.testWriteSafety()
-            syncStatus = "连接、读写和防覆盖检查通过"
+            let report = try await client.testWriteSafety()
+            syncStatus = "连接、读写和防覆盖检查通过\n\n" + report
         } catch { syncStatus = "连接测试失败：\(error.localizedDescription)" }
     }
 
