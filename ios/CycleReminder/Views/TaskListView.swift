@@ -105,6 +105,7 @@ struct TaskListView: View {
     @State private var editor: EditorContext?
     @State private var backfillContext: BackfillContext?
     @State private var taskToDelete: ReminderTask?
+    @State private var showWebDAV = false
     @State private var isImporting = false
     @State private var isExporting = false
     @State private var exportDocument: BackupDocument?
@@ -154,6 +155,10 @@ struct TaskListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
+                        Button { showWebDAV = true } label: {
+                            Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        Divider()
                         Button {
                             prepareExport()
                         } label: {
@@ -178,6 +183,7 @@ struct TaskListView: View {
                 }
             }
         }
+        .sheet(isPresented: $showWebDAV) { WebDAVSettingsView() }
         .sheet(item: $editor) { context in
             TaskEditorView(task: context.task) {
                 name, intervalHours, reminders, lastCompletedAt, gracePercentage in

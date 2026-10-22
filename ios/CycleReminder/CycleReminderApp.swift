@@ -18,6 +18,9 @@ struct CycleReminderApp: App {
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 store.refreshNotifications()
+                store.scheduleAutomaticSync()
+            } else {
+                store.pauseAutomaticSync()
             }
         }
     }

@@ -379,3 +379,278 @@ final class CycleReminderTests: XCTestCase {
         XCTAssertNil(StatisticsCalculator.validGrace(.infinity))
     }
 }
+
+final class WebDAVSyncTests: XCTestCase {
+    private func task(_ id: String = "a", name: String = "任务") -> ReminderTask {
+        var value = ReminderTask.create(name: name, intervalHours: 24, now: Date(timeIntervalSince1970: 1_700_000_000))
+        value.id = id
+        return value
+    }
+    private func snapshot(_ tasks: [ReminderTask], grace: Double = 10) -> SyncSnapshot {
+        SyncSnapshot(tasks: tasks, gracePercentage: grace)
+    }
+
+    func testThreeWayMergePreservesIndependentEditsAndDeletion() throws {
+        let a = task(), b = task("b"), c = task("c")
+        var editedB = b
+        editedB.name = "云端修改"
+        let base = snapshot([a, b])
+        let local = snapshot([b, c])
+        let remote = snapshot([a, editedB])
+        let merged = try SyncSnapshot.merge(base: base, local: local, remote: remote)
+        XCTAssertEqual(merged.tasks, [editedB, c])
+        XCTAssertEqual(try SyncSnapshot.merge(base: merged, local: merged, remote: merged), merged)
+    }
+    func testConflictingEditsAndDeleteVersusEditStopInsteadOfOverwrite() throws {
+        let original = task()
+        var left = original, right = original
+        left.name = "左"
+        right.name = "右"
+        XCTAssertThrowsError(try SyncSnapshot.merge(base: snapshot([original]), local: snapshot([left]), remote: snapshot([right])))
+        XCTAssertThrowsError(try SyncSnapshot.merge(base: snapshot([original]), local: snapshot([]), remote: snapshot([right])))
+        XCTAssertThrowsError(try SyncSnapshot.merge(base: nil, local: snapshot([left]), remote: snapshot([right])))
+    }
+    func testFirstSyncUnionsTasksAndRequiresChoiceForDifferentSettings() throws {
+        XCTAssertEqual(try SyncSnapshot.merge(base: nil, local: snapshot([task()]), remote: snapshot([task("b")])).tasks.count, 2)
+        XCTAssertThrowsError(try SyncSnapshot.merge(base: nil, local: snapshot([]), remote: snapshot([], grace: 20)))
+        XCTAssertEqual(try SyncSnapshot.merge(base: snapshot([]), local: snapshot([], grace: 30), remote: snapshot([])).gracePercentage, 30)
+    }
+    func testStrictRemoteDecodeRejectsDamageDuplicatesAndFutureSchema() throws {
+        let valid = try snapshot([task()]).encoded()
+        XCTAssertEqual(try SyncSnapshot.decode(valid), snapshot([task()]))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        object["schemaVersion"] = 99
+        XCTAssertThrowsError(try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: object)))
+        object["schemaVersion"] = 4
+        var rows = try XCTUnwrap(object["tasks"] as? [[String: Any]])
+        object["tasks"] = [rows[0], rows[0]]
+        XCTAssertThrowsError(try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: object)))
+        rows[0]["nextDueAt"] = "broken-date"
+        object["tasks"] = rows
+        XCTAssertThrowsError(try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: object)))
+        object["tasks"] = [["name": "broken"]]
+        XCTAssertThrowsError(try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: object)))
+    }
+    func testBaselineAndTasksAreSavedTogetherAndBackupOmitsMetadata() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        let value = snapshot([task()])
+        let baseline = SyncBaseline(identity: "test", snapshot: value, syncedAt: Date())
+        try repository.save(value.tasks, gracePercentage: 10, syncBaseline: baseline)
+        XCTAssertEqual(repository.load(), value.tasks)
+        XCTAssertEqual(try repository.loadSyncBaseline()?.snapshot, value)
+        let backup = try XCTUnwrap(String(data: value.encoded(), encoding: .utf8))
+        XCTAssertFalse(backup.contains("syncBaseline"))
+        try repository.saveRecovery(local: value, remote: snapshot([]))
+        let files = try repository.recoveryFiles()
+        XCTAssertEqual(files.count, 2)
+        for file in files { XCTAssertNoThrow(try SyncSnapshot.decode(Data(contentsOf: file))) }
+    }
+    func testSettingsRequireHTTPSAndIdentityExcludesPassword() throws {
+        var settings = WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret")
+        XCTAssertEqual(try settings.baseURL().absoluteString, "https://dav.example/dav/CycleReminder/")
+        let identity = settings.identity
+        settings.password = "new-secret"
+        XCTAssertEqual(settings.identity, identity)
+        settings.username = "different"
+        XCTAssertNotEqual(settings.identity, identity)
+        for address in ["http://dav.example/dav/", "https://user:password@dav.example/", "https://dav.example/?secret=x"] {
+            settings.server = address
+            XCTAssertThrowsError(try settings.baseURL())
+        }
+    }
+
+    private func client() -> WebDAVClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [WebDAVStubProtocol.self]
+        return WebDAVClient(settings: WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret"), session: URLSession(configuration: config))
+    }
+    override func tearDown() {
+        WebDAVStubProtocol.handler = nil
+        super.tearDown()
+    }
+    func testReadAuthenticatesAndRejectsErrorsRatherThanTreatingAsEmpty() async throws {
+        let data = try snapshot([task()]).encoded()
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic dXNlcjpzZWNyZXQ=")
+            return (200, ["ETag": "\"v1\""], data)
+        }
+        let value = try await client().read()
+        XCTAssertEqual(value.etag, "\"v1\"")
+        XCTAssertEqual(value.snapshot?.tasks.count, 1)
+        WebDAVStubProtocol.handler = { _ in (401, [:], Data()) }
+        do { _ = try await client().read(); XCTFail("must fail") } catch {}
+        WebDAVStubProtocol.handler = { _ in (404, [:], Data()) }
+        let missing = try await client().read()
+        XCTAssertNil(missing.snapshot)
+    }
+    func testWriteUsesConditionalHeadersAndRejectsStaleETag() async throws {
+        let value = snapshot([task()])
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "*")
+            return (201, [:], Data())
+        }
+        try await client().write(value, replacing: WebDAVRemote(snapshot: nil, etag: nil))
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"v1\"")
+            return (412, [:], Data())
+        }
+        do {
+            try await client().write(value, replacing: WebDAVRemote(snapshot: value, etag: "\"v1\""))
+            XCTFail("stale version must fail")
+        } catch {}
+        WebDAVStubProtocol.handler = { _ in XCTFail("missing/weak ETag must not send PUT"); return (200, [:], Data()) }
+        for tag in [nil, "W/\"weak\""] as [String?] {
+            do { try await client().write(value, replacing: WebDAVRemote(snapshot: value, etag: tag)); XCTFail("must fail") } catch {}
+        }
+    }
+    func testSafetyProbeRejectsServersThatIgnoreConditionsAndCleansUp() async throws {
+        var deleted = false
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertFalse(request.url!.lastPathComponent == "sync-v1.json")
+            if request.httpMethod == "MKCOL" { return (405, [:], Data()) }
+            if request.httpMethod == "DELETE" { deleted = true; return (204, [:], Data()) }
+            return (201, [:], Data())
+        }
+        do { try await client().testWriteSafety(); XCTFail("unsafe server must fail") } catch {}
+        XCTAssertTrue(deleted)
+    }
+    @MainActor
+    func testStorePreservesEditsMadeWhileUploadIsInFlight() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        let initial = task()
+        try repository.save([initial])
+        let settings = WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret")
+        let store = ReminderStore(repository: repository, loadWebDAVSettings: { settings }, makeWebDAVClient: { _ in self.client() })
+        var probePuts = 0
+        WebDAVStubProtocol.handler = { request in
+            if request.httpMethod == "GET" { return (404, [:], Data()) }
+            if request.httpMethod == "MKCOL" { return (201, [:], Data()) }
+            if request.httpMethod == "DELETE" { return (204, [:], Data()) }
+            if request.url!.lastPathComponent == "sync-v1.json" {
+                await MainActor.run {
+                    store.update(id: initial.id, name: "上传期间修改", intervalHours: 24, reminders: [])
+                }
+                return (201, [:], Data())
+            }
+            probePuts += 1
+            return (probePuts == 1 ? 201 : 412, [:], Data())
+        }
+        await store.synchronizeWebDAV()
+        XCTAssertEqual(store.tasks.first?.name, "上传期间修改")
+        XCTAssertEqual(repository.load().first?.name, "上传期间修改")
+        XCTAssertEqual(try repository.loadSyncBaseline()?.snapshot.tasks.first?.name, initial.name)
+        XCTAssertEqual(store.syncStatus, "已同步，新的本机修改待上传")
+    }
+
+    @MainActor
+    func testStoreConflictConfirmationRejectsChangedRemote() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        try repository.save([task(name: "本机")])
+        let settings = WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret")
+        let store = ReminderStore(repository: repository, loadWebDAVSettings: { settings }, makeWebDAVClient: { _ in self.client() })
+        let remote = try snapshot([task(name: "云端")]).encoded()
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, ["ETag": "\"v1\""], remote)
+        }
+        await store.synchronizeWebDAV()
+        XCTAssertNotNil(store.syncConflict)
+        XCTAssertEqual(store.tasks.first?.name, "本机")
+        let changed = try snapshot([task(name: "云端再次修改")]).encoded()
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, ["ETag": "\"v2\""], changed)
+        }
+        await store.synchronizeWebDAV(resolution: .local)
+        XCTAssertTrue(store.syncStatus.contains("冲突内容已变化"))
+        XCTAssertEqual(repository.load().first?.name, "本机")
+    }
+
+    @MainActor
+    func testAutomaticSyncDoesNotCancelItsOwnNetworkRequest() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        let value = snapshot([task()])
+        try repository.save(value.tasks)
+        let settings = WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret", automatic: true)
+        let store = ReminderStore(repository: repository, loadWebDAVSettings: { settings }, makeWebDAVClient: { _ in self.client() })
+        let remote = try value.encoded()
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, ["ETag": "\"v1\""], remote)
+        }
+        store.scheduleAutomaticSync()
+        for _ in 0..<80 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            if store.lastSyncedAt != nil { break }
+        }
+        XCTAssertEqual(store.syncStatus, "同步成功")
+        XCTAssertNotNil(store.lastSyncedAt)
+        store.pauseAutomaticSync()
+    }
+
+    @MainActor
+    func testStoreDownloadsRemoteDeletionAndPersistsBaseline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        let value = snapshot([task()])
+        let settings = WebDAVSettings(server: "https://dav.example/dav/", username: "user", password: "secret")
+        try repository.save(value.tasks, syncBaseline: SyncBaseline(identity: settings.identity, snapshot: value, syncedAt: Date()))
+        let store = ReminderStore(repository: repository, loadWebDAVSettings: { settings }, makeWebDAVClient: { _ in self.client() })
+        let remote = try snapshot([]).encoded()
+        WebDAVStubProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (200, ["ETag": "\"v2\""], remote)
+        }
+        await store.synchronizeWebDAV()
+        XCTAssertTrue(store.tasks.isEmpty)
+        XCTAssertTrue(repository.load().isEmpty)
+        XCTAssertEqual(try repository.loadSyncBaseline()?.snapshot.tasks.count, 0)
+        XCTAssertEqual(try repository.recoveryFiles().count, 2)
+        XCTAssertEqual(store.syncStatus, "同步成功")
+    }
+
+    func testSafetyProbeAcceptsConditionalServer() async throws {
+        var puts = 0
+        WebDAVStubProtocol.handler = { request in
+            switch request.httpMethod {
+            case "MKCOL": return (201, [:], Data())
+            case "PUT":
+                puts += 1
+                return (puts == 1 ? 201 : 412, [:], Data())
+            case "DELETE": return (204, [:], Data())
+            default: XCTFail("unexpected request"); return (500, [:], Data())
+            }
+        }
+        try await client().testWriteSafety()
+        XCTAssertEqual(puts, 3)
+    }
+}
+
+private final class WebDAVStubProtocol: URLProtocol {
+    static var handler: ((URLRequest) async throws -> (Int, [String: String], Data))?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Task {
+        do {
+            let (status, headers, data) = try await Self.handler!(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+        }
+    }
+    override func stopLoading() {}
+}
