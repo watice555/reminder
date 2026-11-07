@@ -6,8 +6,8 @@ struct BackupDocument: FileDocument {
 
     let data: Data
 
-    init(tasks: [ReminderTask], gracePercentage: Double = 10) throws {
-        data = try BackupCodec.encode(tasks, gracePercentage: gracePercentage)
+    init(tasks: [ReminderTask], gracePercentage: Double = 10, profileName: String? = nil) throws {
+        data = try BackupCodec.encode(tasks, gracePercentage: gracePercentage, profileName: profileName)
     }
 
     init(configuration: ReadConfiguration) throws {

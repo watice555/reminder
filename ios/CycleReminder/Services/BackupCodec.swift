@@ -31,9 +31,13 @@ enum BackupCodec {
         (try? JSONDecoder().decode(BackupEnvelope.self, from: data).gracePercentage) ?? 10
     }
 
-    static func encode(_ tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10) throws -> Data {
+    static func profileName(from data: Data) -> String? {
+        (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["profileName"] as? String
+    }
+
+    static func encode(_ tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10, profileName: String? = nil) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        return try encoder.encode(BackupEnvelope(tasks: tasks, exportedAt: exportedAt, gracePercentage: gracePercentage))
+        return try encoder.encode(BackupEnvelope(tasks: tasks, exportedAt: exportedAt, gracePercentage: gracePercentage, profileName: profileName))
     }
 }

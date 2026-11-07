@@ -19,6 +19,7 @@ final class CycleReminderTests: XCTestCase {
         let tasks = try BackupCodec.decode(Data(json.utf8))
 
         XCTAssertEqual(tasks.count, 1)
+        XCTAssertEqual(tasks[0].kind, .recurring)
         XCTAssertEqual(tasks[0].completions, [])
         XCTAssertEqual(tasks[0].reminders, [])
     }
@@ -377,6 +378,134 @@ final class CycleReminderTests: XCTestCase {
         XCTAssertEqual(repository.load().first?.gracePercentage, 0)
         XCTAssertNil(StatisticsCalculator.validGrace(-1))
         XCTAssertNil(StatisticsCalculator.validGrace(.infinity))
+    }
+}
+
+final class ProfileAndReverseTaskTests: XCTestCase {
+    @MainActor
+    func testProfileMigrationSelectionAndIndependentBackup() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        let recurring = ReminderTask.create(name: "换滤芯", intervalHours: 48)
+        let snapshot = SyncSnapshot(tasks: [recurring], gracePercentage: 25)
+        try repository.save(snapshot.tasks, gracePercentage: snapshot.gracePercentage,
+                            syncBaseline: SyncBaseline(identity: "legacy", snapshot: snapshot, syncedAt: Date()))
+        let legacyData = try Data(contentsOf: repository.fileURL)
+
+        let store = ReminderStore(repository: repository, loadWebDAVSettings: { nil })
+        XCTAssertEqual(store.activeProfile, .standard)
+        XCTAssertEqual(store.tasks, [recurring])
+        XCTAssertEqual(store.gracePercentage, 25)
+        XCTAssertTrue(store.saveProfile(name: "  健康  "))
+        let health = store.activeProfile
+        XCTAssertEqual(health.name, "健康")
+        XCTAssertTrue(store.tasks.isEmpty)
+        XCTAssertEqual(store.gracePercentage, 10)
+        store.create(name: "含糖饮料", intervalHours: 24, reminders: [], kind: .reverse)
+        store.setGracePercentage(5)
+        let backup = try BackupDocument(tasks: store.tasks, gracePercentage: store.gracePercentage, profileName: health.name)
+        XCTAssertEqual(try BackupCodec.decode(backup.data), store.tasks)
+        XCTAssertEqual(BackupCodec.gracePercentage(from: backup.data), 5)
+        XCTAssertEqual(BackupCodec.profileName(from: backup.data), health.name)
+        XCTAssertEqual(try Data(contentsOf: repository.fileURL), legacyData)
+
+        let restarted = ReminderStore(repository: repository, loadWebDAVSettings: { nil })
+        XCTAssertEqual(restarted.activeProfile, health)
+        XCTAssertEqual(restarted.tasks.first?.kind, .reverse)
+        XCTAssertEqual(restarted.gracePercentage, 5)
+        XCTAssertTrue(restarted.saveProfile(name: "生活", id: health.id))
+        XCTAssertEqual(restarted.activeProfile.id, health.id)
+        restarted.replace(with: [], gracePercentage: 15)
+        restarted.selectProfile(.standard)
+        XCTAssertEqual(restarted.tasks, [recurring])
+        XCTAssertEqual(restarted.gracePercentage, 25)
+        XCTAssertEqual(try repository.loadSyncBaseline()?.snapshot, snapshot)
+        restarted.selectProfile(health)
+        XCTAssertTrue(restarted.tasks.isEmpty)
+        XCTAssertEqual(restarted.gracePercentage, 15)
+        restarted.deleteProfile(health)
+        XCTAssertEqual(restarted.activeProfile, .standard)
+        XCTAssertEqual(try repository.loadProfiles().profiles, [.standard])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.forProfile(health).fileURL.path))
+    }
+
+    func testReverseRecordsResetMinimumIntervalAndTrackEarlyOccurrences() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let rule = ReminderRule(id: "ready", mode: .due)
+        var task = ReminderTask.create(
+            name: "含糖饮料", intervalHours: 2,
+            reminders: [rule, ReminderRule(mode: .remainingPercentage, amount: 20)],
+            now: start, kind: .reverse
+        )
+        XCTAssertNil(task.lastCompletedDate)
+        XCTAssertNil(task.nextDueDate)
+        XCTAssertTrue(NotificationScheduler.plans(for: [task], now: start).isEmpty)
+        XCTAssertEqual(task.reminders, [rule])
+
+        XCTAssertTrue(task.backfill(at: start.addingTimeInterval(-60), now: start))
+        XCTAssertNil(task.completions.first?.scheduledDueDate)
+        XCTAssertTrue(task.isTooEarly(at: start))
+        task.complete(at: start)
+        let readyAt = start.addingTimeInterval(7_200)
+        XCTAssertEqual(task.nextDueDate, readyAt)
+        XCTAssertFalse(task.isTooEarly(at: readyAt))
+        let plan = try XCTUnwrap(NotificationScheduler.plans(for: [task], now: start).first)
+        XCTAssertEqual(plan.fireDate, readyAt)
+        XCTAssertTrue(plan.body.contains("最短间隔已满"))
+        XCTAssertTrue(NotificationScheduler.plans(for: [task], now: readyAt).isEmpty)
+
+        task.complete(at: readyAt)
+        let now = readyAt.addingTimeInterval(1)
+        let statistics = try XCTUnwrap(StatisticsCalculator.calculateReverse(tasks: [task], now: now, window: nil).first)
+        XCTAssertEqual(statistics.total, 3)
+        XCTAssertEqual(statistics.eligible, 2)
+        XCTAssertEqual(statistics.early, 1)
+        XCTAssertEqual(statistics.adherenceRate, 0.5)
+        let window = DateInterval(start: start, end: readyAt)
+        let inWindow = try XCTUnwrap(StatisticsCalculator.calculateReverse(tasks: [task], now: now, window: window).first)
+        XCTAssertEqual(inWindow.total, 1)
+        XCTAssertEqual(inWindow.adherenceRate, 0)
+        XCTAssertTrue(StatisticsCalculator.calculate(tasks: [task], now: now).taskRanking.isEmpty)
+    }
+
+    func testReverseBackupAndCloudFormatPreserveUnrecordedAndRecordedStates() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000.12345)
+        let unrecorded = ReminderTask.create(name: "未记录", intervalHours: 2, now: start, kind: .reverse)
+        var recorded = ReminderTask.create(name: "已记录", intervalHours: 0.12345, now: start, kind: .reverse)
+        recorded.complete(at: start)
+        let snapshot = SyncSnapshot(tasks: [unrecorded, recorded], gracePercentage: 10)
+        let data = try snapshot.encoded()
+        XCTAssertEqual(try BackupCodec.decode(data), snapshot.tasks)
+        XCTAssertEqual(try SyncSnapshot.decode(data), snapshot)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 5)
+        object["schemaVersion"] = 4
+        XCTAssertThrowsError(try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: object)))
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = JSONRepository(fileURL: directory.appendingPathComponent("tasks.json"))
+        try repository.save(snapshot.tasks, syncBaseline: SyncBaseline(identity: "test", snapshot: snapshot, syncedAt: start))
+        XCTAssertEqual(try repository.loadSyncBaseline()?.snapshot, snapshot)
+    }
+
+    func testNotificationIdentifiersAndLimitAreSharedAcrossProfiles() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let task = ReminderTask.create(name: "任务", intervalHours: 2, reminders: [ReminderRule(mode: .due)], now: now)
+        let personal = ReminderProfile(id: UUID(), name: "个人")
+        let profiles = [(profile: ReminderProfile.standard, tasks: [task]), (profile: personal, tasks: [task])]
+        let plans = NotificationScheduler.plans(for: profiles, now: now)
+        XCTAssertEqual(Set(plans.map(\.identifier)).count, 2)
+        XCTAssertEqual(Set(plans.map(\.title)), ["默认 · 任务", "个人 · 任务"])
+
+        let laterTasks = (0..<64).map { index in
+            ReminderTask.create(name: "较晚任务", intervalHours: Double(index + 3),
+                                reminders: [ReminderRule(mode: .due)], now: now)
+        }
+        let combined = NotificationScheduler.plans(for: [profiles[0], (personal, [task] + laterTasks)], now: now)
+        XCTAssertEqual(combined.count, NotificationScheduler.maximumPendingNotifications)
+        XCTAssertEqual(Set(combined.prefix(2).map(\.identifier)), Set(plans.map(\.identifier)))
     }
 }
 

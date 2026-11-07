@@ -49,21 +49,37 @@ enum ReminderDate {
     }
 }
 
+struct ReminderProfile: Codable, Identifiable, Equatable {
+    static let standard = ReminderProfile(id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!, name: "默认")
+
+    let id: UUID
+    var name: String
+
+    var isStandard: Bool { id == Self.standard.id }
+}
+
+struct ProfileSelection: Codable {
+    var profiles: [ReminderProfile] = [.standard]
+    var activeID = ReminderProfile.standard.id
+}
+
 struct CompletionRecord: Codable, Identifiable, Equatable {
     var id: String
     var completedAt: String
-    var scheduledDueAt: String
+    // The first reverse occurrence may have no previous interval boundary.
+    var scheduledDueAt: String?
     var intervalHours: Double
 
     var completedDate: Date? { ISODate.parse(completedAt) }
-    var scheduledDueDate: Date? { ISODate.parse(scheduledDueAt) }
+    var scheduledDueDate: Date? { scheduledDueAt.flatMap(ISODate.parse) }
 
-    func normalized() -> CompletionRecord? {
+    func normalized(allowMissingDueDate: Bool = false) -> CompletionRecord? {
+        let dueDate = scheduledDueDate
         guard
             intervalHours.isFinite,
             intervalHours > 0,
             let completedDate,
-            let scheduledDueDate
+            dueDate != nil || (allowMissingDueDate && scheduledDueAt == nil)
         else {
             return nil
         }
@@ -71,7 +87,7 @@ struct CompletionRecord: Codable, Identifiable, Equatable {
         return CompletionRecord(
             id: id.isEmpty ? UUID().uuidString : id,
             completedAt: ISODate.string(from: completedDate),
-            scheduledDueAt: ISODate.string(from: scheduledDueDate),
+            scheduledDueAt: dueDate.map(ISODate.string),
             intervalHours: intervalHours
         )
     }
@@ -153,12 +169,25 @@ struct ReminderRule: Codable, Identifiable, Equatable {
     }
 }
 
+enum ReminderKind: String, Codable, CaseIterable, Identifiable {
+    case recurring
+    case reverse
+
+    var id: String { rawValue }
+    var title: String { self == .reverse ? "反向任务" : "循环提醒" }
+
+    func supports(_ mode: ReminderMode) -> Bool {
+        self == .recurring || mode == .due
+    }
+}
+
 struct ReminderTask: Codable, Identifiable, Equatable {
     var id: String
     var name: String
+    let kind: ReminderKind
     var intervalHours: Double
-    var lastCompletedAt: String
-    var nextDueAt: String
+    var lastCompletedAt: String?
+    var nextDueAt: String?
     var createdAt: String
     var completions: [CompletionRecord]
     var gracePercentage: Double?
@@ -167,6 +196,7 @@ struct ReminderTask: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case kind
         case intervalHours
         case lastCompletedAt
         case nextDueAt
@@ -180,21 +210,23 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         id: String,
         name: String,
         intervalHours: Double,
-        lastCompletedAt: String,
-        nextDueAt: String,
+        lastCompletedAt: String?,
+        nextDueAt: String?,
         createdAt: String,
         completions: [CompletionRecord] = [],
         reminders: [ReminderRule] = [],
-        gracePercentage: Double? = nil
+        gracePercentage: Double? = nil,
+        kind: ReminderKind = .recurring
     ) {
         self.id = id
         self.name = name
+        self.kind = kind
         self.intervalHours = intervalHours
         self.lastCompletedAt = lastCompletedAt
         self.nextDueAt = nextDueAt
         self.createdAt = createdAt
         self.completions = completions
-        self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
+        self.gracePercentage = kind == .recurring ? StatisticsCalculator.validGrace(gracePercentage) : nil
         self.reminders = reminders
     }
 
@@ -203,9 +235,15 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         name = try container.decode(String.self, forKey: .name)
         intervalHours = try container.decode(Double.self, forKey: .intervalHours)
-        lastCompletedAt = try container.decode(String.self, forKey: .lastCompletedAt)
-        nextDueAt = try container.decode(String.self, forKey: .nextDueAt)
-        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? lastCompletedAt
+        kind = try container.decodeIfPresent(ReminderKind.self, forKey: .kind) ?? .recurring
+        if kind == .reverse {
+            lastCompletedAt = try container.decodeIfPresent(String.self, forKey: .lastCompletedAt)
+            nextDueAt = try container.decodeIfPresent(String.self, forKey: .nextDueAt)
+        } else {
+            lastCompletedAt = try container.decode(String.self, forKey: .lastCompletedAt)
+            nextDueAt = try container.decode(String.self, forKey: .nextDueAt)
+        }
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? lastCompletedAt ?? ""
         completions = try container.decodeIfPresent(
             LossyArray<CompletionRecord>.self,
             forKey: .completions
@@ -217,37 +255,50 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         )?.elements ?? []
     }
 
-    var lastCompletedDate: Date? { ISODate.parse(lastCompletedAt) }
-    var nextDueDate: Date? { ISODate.parse(nextDueAt) }
+    var lastCompletedDate: Date? { lastCompletedAt.flatMap(ISODate.parse) }
+    var nextDueDate: Date? { nextDueAt.flatMap(ISODate.parse) }
     var createdDate: Date? { ISODate.parse(createdAt) }
+
+    func isTooEarly(at date: Date) -> Bool {
+        kind == .reverse && nextDueDate.map { date < $0 } == true
+    }
+
+    private static func normalizedReminders(_ rules: [ReminderRule], kind: ReminderKind, intervalHours: Double) -> [ReminderRule] {
+        let valid = rules.filter { kind.supports($0.mode) }.compactMap { $0.normalized(intervalHours: intervalHours) }
+        if kind == .reverse { return Array(valid.prefix(1)) }
+        var seenIDs = Set<String>()
+        return valid.filter { seenIDs.insert($0.id).inserted }
+    }
 
     static func create(
         name: String,
         intervalHours: Double,
         reminders: [ReminderRule] = [],
         lastCompletedAt: Date? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        kind: ReminderKind = .recurring
     ) -> ReminderTask {
-        let completedDate = lastCompletedAt ?? now
+        let completedDate = lastCompletedAt ?? (kind == .recurring ? now : nil)
+        let completedAt = completedDate.map(ISODate.string)
+        let anchor = kind == .reverse ? completedAt.flatMap(ISODate.parse) : completedDate
         return ReminderTask(
             id: UUID().uuidString,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             intervalHours: intervalHours,
-            lastCompletedAt: ISODate.string(from: completedDate),
-            nextDueAt: ISODate.string(
-                from: completedDate.addingTimeInterval(intervalHours * 3_600)
-            ),
+            lastCompletedAt: completedAt,
+            nextDueAt: anchor.map { ISODate.string(from: $0.addingTimeInterval(intervalHours * 3_600)) },
             createdAt: ISODate.string(from: now),
-            reminders: reminders.compactMap { $0.normalized(intervalHours: intervalHours) }
+            reminders: normalizedReminders(reminders, kind: kind, intervalHours: intervalHours),
+            kind: kind
         )
     }
 
     mutating func update(name: String, intervalHours: Double, reminders: [ReminderRule]) {
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.intervalHours = intervalHours
-        self.reminders = reminders.compactMap { $0.normalized(intervalHours: intervalHours) }
-        let anchor = lastCompletedDate ?? Date()
-        nextDueAt = ISODate.string(from: anchor.addingTimeInterval(intervalHours * 3_600))
+        self.reminders = Self.normalizedReminders(reminders, kind: kind, intervalHours: intervalHours)
+        let anchor = lastCompletedDate ?? (kind == .recurring ? Date() : nil)
+        nextDueAt = anchor.map { ISODate.string(from: $0.addingTimeInterval(intervalHours * 3_600)) }
     }
 
     mutating func complete(at date: Date = Date()) {
@@ -259,18 +310,14 @@ struct ReminderTask: Codable, Identifiable, Equatable {
         )
         completions.append(record)
         lastCompletedAt = record.completedAt
-        nextDueAt = ISODate.string(from: date.addingTimeInterval(intervalHours * 3_600))
+        let anchor = kind == .reverse ? (record.completedDate ?? date) : date
+        nextDueAt = ISODate.string(from: anchor.addingTimeInterval(intervalHours * 3_600))
     }
 
     @discardableResult
     mutating func backfill(at date: Date, now: Date = Date()) -> Bool {
-        guard
-            let lastCompletedDate,
-            date > lastCompletedDate,
-            date <= now
-        else {
-            return false
-        }
+        guard date <= now,
+              lastCompletedDate.map({ date > $0 }) ?? (kind == .reverse) else { return false }
 
         complete(at: date)
         return true
@@ -282,29 +329,28 @@ struct ReminderTask: Codable, Identifiable, Equatable {
             return nil
         }
 
-        let lastDate = lastCompletedDate ?? fallbackDate
-        let dueDate = nextDueDate ?? lastDate.addingTimeInterval(intervalHours * 3_600)
         let creationDate = createdDate ?? fallbackDate
         var seenCompletionIDs = Set<String>()
         let safeCompletions = completions
-            .compactMap { $0.normalized() }
+            .compactMap { $0.normalized(allowMissingDueDate: kind == .reverse) }
             .filter { seenCompletionIDs.insert($0.id).inserted }
             .sorted { ($0.completedDate ?? .distantPast) < ($1.completedDate ?? .distantPast) }
-        var seenReminderIDs = Set<String>()
-        let safeReminders = reminders
-            .compactMap { $0.normalized(intervalHours: intervalHours) }
-            .filter { seenReminderIDs.insert($0.id).inserted }
+        let lastDate = lastCompletedDate ?? (kind == .reverse ? safeCompletions.last?.completedDate : fallbackDate)
+        let dueDate = lastDate.map { anchor in
+            (kind == .recurring ? nextDueDate : nil) ?? anchor.addingTimeInterval(intervalHours * 3_600)
+        }
 
         return ReminderTask(
             id: id.isEmpty ? UUID().uuidString : id,
             name: trimmedName,
             intervalHours: intervalHours,
-            lastCompletedAt: ISODate.string(from: lastDate),
-            nextDueAt: ISODate.string(from: dueDate),
+            lastCompletedAt: lastDate.map(ISODate.string),
+            nextDueAt: dueDate.map(ISODate.string),
             createdAt: ISODate.string(from: creationDate),
             completions: safeCompletions,
-            reminders: safeReminders,
-            gracePercentage: gracePercentage
+            reminders: Self.normalizedReminders(reminders, kind: kind, intervalHours: intervalHours),
+            gracePercentage: gracePercentage,
+            kind: kind
         )
     }
 }
@@ -314,12 +360,19 @@ struct BackupEnvelope: Codable, Equatable {
     let exportedAt: String
     let gracePercentage: Double
     let tasks: [ReminderTask]
+    let profileName: String?
 
-    init(tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10) {
-        schemaVersion = 4
+    static func schemaVersion(for tasks: [ReminderTask]) -> Int {
+        // Older sync clients reject v5 instead of interpreting reverse tasks as recurring.
+        tasks.contains { $0.kind == .reverse } ? 5 : 4
+    }
+
+    init(tasks: [ReminderTask], exportedAt: Date = Date(), gracePercentage: Double = 10, profileName: String? = nil) {
+        schemaVersion = Self.schemaVersion(for: tasks)
         self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage) ?? 10
         self.exportedAt = ISODate.string(from: exportedAt)
         self.tasks = tasks
+        self.profileName = profileName
     }
 
     enum CodingKeys: String, CodingKey {
@@ -327,6 +380,7 @@ struct BackupEnvelope: Codable, Equatable {
         case gracePercentage
         case exportedAt
         case tasks
+        case profileName
     }
 
     init(from decoder: Decoder) throws {
@@ -335,5 +389,6 @@ struct BackupEnvelope: Codable, Equatable {
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         exportedAt = try container.decodeIfPresent(String.self, forKey: .exportedAt) ?? ISODate.string(from: Date())
         tasks = try container.decode(LossyArray<ReminderTask>.self, forKey: .tasks).elements
+        profileName = try? container.decode(String.self, forKey: .profileName)
     }
 }

@@ -76,7 +76,7 @@ struct SyncSnapshot: Codable, Equatable {
     // Sync must reject damaged/future files rather than silently drop records as backup import does.
     static func decode(_ data: Data) throws -> SyncSnapshot {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = object["schemaVersion"] as? Int, version == 4,
+              let version = object["schemaVersion"] as? Int, version == 4 || version == 5,
               let rows = object["tasks"] as? [[String: Any]],
               let grace = object["gracePercentage"] as? Double,
               StatisticsCalculator.validGrace(grace) == grace else {
@@ -88,6 +88,7 @@ struct SyncSnapshot: Codable, Equatable {
         }
         for (row, task) in zip(rows, tasks) {
             guard row["id"] as? String == task.id,
+                  task.kind == .recurring || version == 5,
                   row["lastCompletedAt"] as? String == task.lastCompletedAt,
                   row["nextDueAt"] as? String == task.nextDueAt,
                   row["createdAt"] as? String == task.createdAt,
@@ -98,8 +99,12 @@ struct SyncSnapshot: Codable, Equatable {
             let reminderIDs = Set(task.reminders.map(\.id))
             guard completions.allSatisfy({ item in
                 guard let id = item["id"] as? String, !id.isEmpty,
-                      let completed = item["completedAt"] as? String, ISODate.parse(completed) != nil,
-                      let due = item["scheduledDueAt"] as? String, ISODate.parse(due) != nil else { return false }
+                      let completed = item["completedAt"] as? String, ISODate.parse(completed) != nil else { return false }
+                if let due = item["scheduledDueAt"] as? String {
+                    guard ISODate.parse(due) != nil else { return false }
+                } else if task.kind == .recurring || item["scheduledDueAt"] != nil {
+                    return false
+                }
                 return completionIDs.contains(id)
             }), reminders.allSatisfy({ item in
                 guard let id = item["id"] as? String, !id.isEmpty else { return false }

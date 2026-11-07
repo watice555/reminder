@@ -133,9 +133,11 @@ private struct ReminderDraftRow: View {
 
 struct TaskEditorView: View {
     let task: ReminderTask?
-    let onSave: (String, Double, [ReminderRule], Date?, Double?) -> Void
+    let onSave: (String, Double, [ReminderRule], Date?, Double?, ReminderKind) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var kind: ReminderKind
+    @State private var notifyWhenReady: Bool
     @State private var customGrace: Bool
     @State private var graceText: String
     @State private var name: String
@@ -149,8 +151,10 @@ struct TaskEditorView: View {
 
     init(
         task: ReminderTask?,
-        onSave: @escaping (String, Double, [ReminderRule], Date?, Double?) -> Void
+        onSave: @escaping (String, Double, [ReminderRule], Date?, Double?, ReminderKind) -> Void
     ) {
+        _kind = State(initialValue: task?.kind ?? .recurring)
+        _notifyWhenReady = State(initialValue: task?.reminders.contains { $0.mode == .due } ?? true)
         _customGrace = State(initialValue: task?.gracePercentage != nil)
         _graceText = State(initialValue: DisplayFormat.number(task?.gracePercentage ?? 10))
         self.task = task
@@ -170,6 +174,10 @@ struct TaskEditorView: View {
         _initialCompletedAt = State(initialValue: ReminderDate.floorToMinute(Date()))
     }
 
+    private var isReverse: Bool { kind == .reverse }
+    private var previousEvent: String { isReverse ? "上次发生" : "上次完成" }
+    private var boundary: String { isReverse ? "最短间隔结束" : "下次到期" }
+
     private var intervalHours: Double? {
         let dayValue = days.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : Double(days)
         let hourValue = hours.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : Double(hours)
@@ -178,7 +186,8 @@ struct TaskEditorView: View {
             let hourValue,
             dayValue >= 0,
             hourValue >= 0,
-            dayValue * 24 + hourValue > 0
+            dayValue * 24 + hourValue > 0,
+            ((dayValue * 24 + hourValue) * 3_600).isFinite
         else {
             return nil
         }
@@ -187,6 +196,10 @@ struct TaskEditorView: View {
 
     private var reminderRules: [ReminderRule]? {
         guard let intervalHours else { return nil }
+        if isReverse {
+            guard notifyWhenReady else { return [] }
+            return [task?.reminders.first { $0.mode == .due } ?? ReminderRule(mode: .due)]
+        }
         let rules = reminderDrafts.compactMap { $0.rule(intervalHours: intervalHours) }
         return rules.count == reminderDrafts.count ? rules : nil
     }
@@ -194,12 +207,24 @@ struct TaskEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if task == nil {
+                    Section {
+                        Picker("任务类型", selection: $kind) {
+                            ForEach(ReminderKind.allCases) { kind in Text(kind.title).tag(kind) }
+                        }
+                        .pickerStyle(.segmented)
+                    } footer: {
+                        Text(isReverse
+                             ? "每次发生后至少等满设定间隔。提前发生时也可以记录。"
+                             : "按设定间隔完成任务，每次完成后开始新的循环。")
+                    }
+                }
                 Section("任务名称") {
-                    TextField("例如：换滤芯", text: $name)
+                    TextField(isReverse ? "例如：喝含糖饮料" : "例如：换滤芯", text: $name)
                         .textInputAutocapitalization(.never)
                 }
 
-                Section("循环时间") {
+                Section(isReverse ? "最短间隔" : "循环时间") {
                     HStack {
                         TextField("0", text: $days)
                             .keyboardType(.numberPad)
@@ -214,21 +239,23 @@ struct TaskEditorView: View {
                     }
                 }
 
-                Section {
-                    Toggle("单独设置宽限", isOn: $customGrace)
-                    if customGrace {
-                        HStack {
-                            Text("允许延迟")
-                            TextField("10", text: $graceText).keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                            Text("%")
+                if !isReverse {
+                    Section {
+                        Toggle("单独设置宽限", isOn: $customGrace)
+                        if customGrace {
+                            HStack {
+                                Text("允许延迟")
+                                TextField("10", text: $graceText).keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                Text("%")
+                            }
+                            if StatisticsCalculator.validGrace(Double(graceText)) == nil {
+                                Text("请输入大于或等于 0 的百分比").foregroundStyle(AppPalette.red)
+                            }
                         }
-                        if StatisticsCalculator.validGrace(Double(graceText)) == nil {
-                            Text("请输入大于或等于 0 的百分比").foregroundStyle(AppPalette.red)
-                        }
+                    } header: { Text("统计宽限") } footer: {
+                        Text("未单独设置时使用当前 Profile 的宽限。修改后重算历史统计，不改变通知时间。")
                     }
-                } header: { Text("统计宽限") } footer: {
-                    Text("未单独设置时跟随全局。修改后重算历史统计，不改变通知时间。")
                 }
 
                 if task == nil {
@@ -238,18 +265,20 @@ struct TaskEditorView: View {
                             isExpanded: $advancedSettingsExpanded
                         ) {
                             Toggle(
-                                "自定义上次完成时间",
+                                "自定义\(previousEvent)时间",
                                 isOn: $usesCustomInitialCompletion
                             )
 
                             if usesCustomInitialCompletion {
                                 DatePicker(
-                                    "上次完成时间",
+                                    "\(previousEvent)时间",
                                     selection: $initialCompletedAt,
                                     in: ...Date(),
                                     displayedComponents: [.date, .hourAndMinute]
                                 )
-                                Text("只用于确定当前周期，不会计入完成统计。")
+                                Text(isReverse
+                                     ? "用于计算最短间隔，不计为一条记录。"
+                                     : "只用于确定当前周期，不会计入完成统计。")
                                     .font(.caption)
                                     .foregroundStyle(AppPalette.muted)
                             }
@@ -257,32 +286,19 @@ struct TaskEditorView: View {
                     }
                 }
 
-                Section {
-                    if reminderDrafts.isEmpty {
-                        Text("未设置系统提醒")
-                            .foregroundStyle(AppPalette.muted)
+                if isReverse {
+                    Section {
+                        Toggle("最短间隔结束时提醒", isOn: $notifyWhenReady)
+                    } header: {
+                        Text("系统提醒")
+                    } footer: {
+                        Text("记录后开始计时。间隔结束时会提醒可以再做，随后等待下一次记录。")
                     }
-
-                    ForEach($reminderDrafts) { $draft in
-                        ReminderDraftRow(
-                            draft: $draft,
-                            intervalHours: intervalHours,
-                            onDelete: { removeReminder(id: draft.id) }
-                        )
-                    }
-
-                    Button {
-                        addReminder()
-                    } label: {
-                        Label("添加提醒", systemImage: "plus.circle")
-                    }
-                } header: {
-                    Text("系统提醒")
-                } footer: {
-                    Text("可添加多条提醒。首次保存提醒时，系统会请求通知权限。")
+                } else {
+                    recurringReminders
                 }
             }
-            .navigationTitle(task == nil ? "新增任务" : "编辑任务")
+            .navigationTitle(task == nil ? "新增任务" : (isReverse ? "编辑反向任务" : "编辑任务"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -303,7 +319,7 @@ struct TaskEditorView: View {
                     }
                     .disabled(
                         name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || (customGrace && StatisticsCalculator.validGrace(Double(graceText)) == nil)
+                            || (!isReverse && customGrace && StatisticsCalculator.validGrace(Double(graceText)) == nil)
                             || intervalHours == nil
                             || reminderRules == nil
                             || (usesCustomInitialCompletion && initialCompletedAt > Date())
@@ -315,7 +331,7 @@ struct TaskEditorView: View {
                     initialCompletedAt = ReminderDate.floorToMinute(Date())
                 }
             }
-            .alert("确认自定义上次完成时间", isPresented: $showCustomCompletionConfirmation) {
+            .alert("确认自定义\(previousEvent)时间", isPresented: $showCustomCompletionConfirmation) {
                 Button("确认创建") {
                     guard let intervalHours, let reminderRules else { return }
                     saveAndDismiss(
@@ -331,11 +347,38 @@ struct TaskEditorView: View {
                     completedAt.addingTimeInterval($0 * 3_600)
                 }
                 Text(
-                    "上次完成：\(DisplayFormat.dateTime(completedAt))\n" +
-                    "下次到期：\(DisplayFormat.dateTime(dueAt))\n\n" +
-                    "这个时间只用于确定当前周期，不会计入完成统计。"
+                    "\(previousEvent)：\(DisplayFormat.dateTime(completedAt))\n" +
+                    "\(boundary)：\(DisplayFormat.dateTime(dueAt))\n\n" +
+                    "这个时间用于确定本轮的间隔，不计为一条记录。"
                 )
             }
+        }
+    }
+
+    private var recurringReminders: some View {
+        Section {
+            if reminderDrafts.isEmpty {
+                Text("未设置系统提醒")
+                    .foregroundStyle(AppPalette.muted)
+            }
+
+            ForEach($reminderDrafts) { $draft in
+                ReminderDraftRow(
+                    draft: $draft,
+                    intervalHours: intervalHours,
+                    onDelete: { removeReminder(id: draft.id) }
+                )
+            }
+
+            Button {
+                addReminder()
+            } label: {
+                Label("添加提醒", systemImage: "plus.circle")
+            }
+        } header: {
+            Text("系统提醒")
+        } footer: {
+            Text("可添加多条提醒。首次保存提醒时，系统会请求通知权限。")
         }
     }
 
@@ -349,7 +392,8 @@ struct TaskEditorView: View {
             intervalHours,
             reminderRules,
             lastCompletedAt,
-            customGrace ? Double(graceText) : nil
+            !isReverse && customGrace ? Double(graceText) : nil,
+            kind
         )
         dismiss()
     }

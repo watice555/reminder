@@ -19,27 +19,29 @@ private struct BackfillCompletionView: View {
     @State private var completedAt: Date
     @State private var showConfirmation = false
 
-    private let earliestDate: Date
+    private let earliestDate: Date?
     private let latestDate: Date
 
     init(task: ReminderTask, onConfirm: @escaping (Date) -> Bool) {
         self.task = task
         self.onConfirm = onConfirm
         let latest = ReminderDate.floorToMinute(Date())
-        let lastCompletedAt = task.lastCompletedDate ?? latest
-        let earliest = ReminderDate.floorToMinute(lastCompletedAt).addingTimeInterval(60)
-        earliestDate = earliest
+        earliestDate = task.lastCompletedDate.map { ReminderDate.floorToMinute($0).addingTimeInterval(60) }
         latestDate = latest
         _completedAt = State(initialValue: latest)
     }
 
     private var hasAvailableMinute: Bool {
-        earliestDate <= latestDate
+        earliestDate.map { $0 <= latestDate } ?? true
     }
 
     private var nextDueDate: Date {
         completedAt.addingTimeInterval(task.intervalHours * 3_600)
     }
+
+    private var isReverse: Bool { task.kind == .reverse }
+    private var dateLabel: String { isReverse ? "实际发生时间" : "实际完成时间" }
+    private var title: String { isReverse ? "补记发生" : "补记完成" }
 
     var body: some View {
         NavigationStack {
@@ -48,9 +50,9 @@ private struct BackfillCompletionView: View {
                     Text(task.name)
                         .font(.headline)
 
-                    if hasAvailableMinute {
+                    if let earliestDate, hasAvailableMinute {
                         DatePicker(
-                            "实际完成时间",
+                            dateLabel,
                             selection: $completedAt,
                             in: earliestDate...latestDate,
                             displayedComponents: [.date, .hourAndMinute]
@@ -61,13 +63,16 @@ private struct BackfillCompletionView: View {
                         )
                         .font(.caption)
                         .foregroundStyle(AppPalette.muted)
+                    } else if earliestDate == nil {
+                        DatePicker(dateLabel, selection: $completedAt, in: ...latestDate,
+                                   displayedComponents: [.date, .hourAndMinute])
                     } else {
                         Text("当前周期还没有可补记的分钟。")
                             .foregroundStyle(AppPalette.muted)
                     }
                 }
             }
-            .navigationTitle("补记完成")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -80,7 +85,7 @@ private struct BackfillCompletionView: View {
                     .disabled(!hasAvailableMinute)
                 }
             }
-            .alert("确认补记完成", isPresented: $showConfirmation) {
+            .alert("确认\(title)", isPresented: $showConfirmation) {
                 Button("确认补记") {
                     let preciseDate = ReminderDate.floorToMinute(completedAt)
                     if onConfirm(preciseDate) {
@@ -89,11 +94,12 @@ private struct BackfillCompletionView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text(
-                    "完成时间：\(DisplayFormat.dateTime(completedAt))\n" +
-                    "下次到期：\(DisplayFormat.dateTime(nextDueDate))\n\n" +
-                    "确认后将新增 1 条完成记录，并按这个时间重排后续提醒。"
-                )
+                let boundary = isReverse ? "最短间隔结束" : "下次到期"
+                let note = task.isTooEarly(at: ReminderDate.floorToMinute(completedAt))
+                    ? "这次发生时尚未满最短间隔，将计为提前。"
+                    : "确认后将新增 1 条记录，并按这个时间重排提醒。"
+                Text("\(dateLabel)：\(DisplayFormat.dateTime(completedAt))\n" +
+                     "\(boundary)：\(DisplayFormat.dateTime(nextDueDate))\n\n\(note)")
             }
         }
     }
@@ -109,8 +115,10 @@ struct TaskListView: View {
     @State private var isImporting = false
     @State private var isExporting = false
     @State private var exportDocument: BackupDocument?
+    @State private var exportFilename = "循环提醒-备份"
     @State private var pendingGracePercentage: Double = 10
     @State private var pendingImportedTasks: [ReminderTask] = []
+    @State private var pendingSourceName: String?
     @State private var showImportConfirmation = false
 
     var body: some View {
@@ -125,7 +133,7 @@ struct TaskListView: View {
                             .foregroundStyle(AppPalette.muted)
                         Text("还没有任务")
                             .font(.headline)
-                        Text("新增一个任务，例如“换滤芯”，设置 2 天循环。")
+                        Text("点击右上角 +，新增循环提醒或反向任务。")
                             .font(.subheadline)
                             .foregroundStyle(AppPalette.muted)
                             .multilineTextAlignment(.center)
@@ -138,7 +146,7 @@ struct TaskListView: View {
                                 TaskCardView(
                                     task: task,
                                     gracePercentage: task.gracePercentage ?? store.gracePercentage,
-                                    onComplete: { store.complete(id: task.id) },
+                                    onComplete: { store.complete(id: task.id, at: $0) },
                                     onBackfill: {
                                         backfillContext = BackfillContext(task: task)
                                     },
@@ -149,16 +157,19 @@ struct TaskListView: View {
                         }
                         .padding(16)
                     }
+                    .id(store.activeProfile.id)
                 }
             }
             .navigationTitle("循环提醒")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Button { showWebDAV = true } label: {
-                            Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
+                        if store.activeProfile.isStandard {
+                            Button { showWebDAV = true } label: {
+                                Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            Divider()
                         }
-                        Divider()
                         Button {
                             prepareExport()
                         } label: {
@@ -174,7 +185,8 @@ struct TaskListView: View {
                     }
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    ProfileMenu()
                     Button {
                         editor = EditorContext(task: nil)
                     } label: {
@@ -186,7 +198,7 @@ struct TaskListView: View {
         .sheet(isPresented: $showWebDAV) { WebDAVSettingsView() }
         .sheet(item: $editor) { context in
             TaskEditorView(task: context.task) {
-                name, intervalHours, reminders, lastCompletedAt, gracePercentage in
+                name, intervalHours, reminders, lastCompletedAt, gracePercentage, kind in
                 if let task = context.task {
                     store.update(
                         id: task.id,
@@ -201,7 +213,8 @@ struct TaskListView: View {
                         intervalHours: intervalHours,
                         reminders: reminders,
                         lastCompletedAt: lastCompletedAt,
-                        gracePercentage: gracePercentage
+                        gracePercentage: gracePercentage,
+                        kind: kind
                     )
                 }
             }
@@ -219,7 +232,7 @@ struct TaskListView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("删除任务和 \(taskToDelete?.completions.count ?? 0) 条完成记录", role: .destructive) {
+            Button("删除任务和 \(taskToDelete?.completions.count ?? 0) 条记录", role: .destructive) {
                 guard let task = taskToDelete else { return }
                 store.delete(id: task.id)
                 taskToDelete = nil
@@ -233,27 +246,34 @@ struct TaskListView: View {
             isPresented: $isExporting,
             document: exportDocument,
             contentType: .json,
-            defaultFilename: "循环提醒-备份"
+            defaultFilename: exportFilename
         ) { result in
             if case .failure(let error) = result {
                 store.errorMessage = "导出失败：\(error.localizedDescription)"
             }
         }
         .alert("导入备份", isPresented: $showImportConfirmation) {
-            Button("替换当前数据", role: .destructive) {
+            Button("替换当前 Profile", role: .destructive) {
                 store.replace(with: pendingImportedTasks, gracePercentage: pendingGracePercentage)
                 pendingImportedTasks = []
             }
             Button("取消", role: .cancel) { pendingImportedTasks = [] }
         } message: {
             let completions = pendingImportedTasks.reduce(0) { $0 + $1.completions.count }
-            Text("将用 \(pendingImportedTasks.count) 个任务和 \(completions) 条完成记录替换当前数据，并将全局宽限设为 \(DisplayFormat.number(pendingGracePercentage))%。")
+            let source = pendingSourceName.map { "备份来源「\($0)」。\n" } ?? ""
+            Text("\(source)将用 \(pendingImportedTasks.count) 个任务和 \(completions) 条记录替换「\(store.activeProfile.name)」的数据，并将该 Profile 的统计宽限设为 \(DisplayFormat.number(pendingGracePercentage))%。")
         }
     }
 
     private func prepareExport() {
         do {
-            exportDocument = try BackupDocument(tasks: store.tasks, gracePercentage: store.gracePercentage)
+            let name = store.activeProfile.name
+            exportDocument = try BackupDocument(tasks: store.tasks, gracePercentage: store.gracePercentage, profileName: name)
+            let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
+            let safeName = String(name.components(separatedBy: invalid).joined(separator: "-").unicodeScalars.prefix(40))
+            let stamp = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current))
+                .replacingOccurrences(of: ":", with: "-")
+            exportFilename = "循环提醒-\(safeName)-\(stamp)"
             isExporting = true
         } catch {
             store.errorMessage = "导出失败：\(error.localizedDescription)"
@@ -268,6 +288,7 @@ struct TaskListView: View {
             let data = try Data(contentsOf: url)
             pendingImportedTasks = try BackupCodec.decode(data)
             pendingGracePercentage = BackupCodec.gracePercentage(from: data)
+            pendingSourceName = BackupCodec.profileName(from: data)
             showImportConfirmation = true
         } catch {
             store.errorMessage = "导入失败：\(error.localizedDescription)"

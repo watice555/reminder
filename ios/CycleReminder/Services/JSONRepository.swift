@@ -7,6 +7,41 @@ struct JSONRepository {
         self.fileURL = fileURL ?? Self.defaultFileURL()
     }
 
+    private var directory: URL { fileURL.deletingLastPathComponent() }
+    private var selectionURL: URL { directory.appendingPathComponent("profiles.json") }
+
+    func forProfile(_ profile: ReminderProfile) -> JSONRepository {
+        guard !profile.isStandard else { return self }
+        return JSONRepository(fileURL: directory
+            .appendingPathComponent("Profiles", isDirectory: true)
+            .appendingPathComponent(profile.id.uuidString, isDirectory: true)
+            .appendingPathComponent("tasks.json"))
+    }
+
+    func loadProfiles() throws -> ProfileSelection {
+        guard FileManager.default.fileExists(atPath: selectionURL.path) else { return ProfileSelection() }
+        let selection = try JSONDecoder().decode(ProfileSelection.self, from: Data(contentsOf: selectionURL))
+        let ids = Set(selection.profiles.map(\.id))
+        guard ids.count == selection.profiles.count, ids.contains(ReminderProfile.standard.id),
+              ids.contains(selection.activeID) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return selection
+    }
+
+    func saveProfiles(_ selection: ProfileSelection) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(selection).write(to: selectionURL, options: .atomic)
+    }
+
+    func removeProfileData(_ profile: ReminderProfile) throws {
+        guard !profile.isStandard else { return }
+        let profileDirectory = forProfile(profile).directory
+        if FileManager.default.fileExists(atPath: profileDirectory.path) {
+            try FileManager.default.removeItem(at: profileDirectory)
+        }
+    }
+
     func load() -> [ReminderTask] {
         guard let data = try? Data(contentsOf: fileURL) else {
             return []
@@ -20,7 +55,6 @@ struct JSONRepository {
     }
 
     func save(_ tasks: [ReminderTask], gracePercentage: Double = 10, syncBaseline: SyncBaseline? = nil) throws {
-        let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let backup = try BackupCodec.encode(tasks, gracePercentage: gracePercentage)
         var object = try JSONSerialization.jsonObject(with: backup) as! [String: Any]
@@ -46,7 +80,7 @@ struct JSONRepository {
               var rawSnapshot = rawBaseline["snapshot"] as? [String: Any] else {
             throw WebDAVError.message("本机同步基线无效。")
         }
-        rawSnapshot["schemaVersion"] = 4
+        rawSnapshot["schemaVersion"] = BackupEnvelope.schemaVersion(for: decoded.snapshot.tasks)
         _ = try SyncSnapshot.decode(JSONSerialization.data(withJSONObject: rawSnapshot))
         return decoded
     }

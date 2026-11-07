@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class ReminderStore: ObservableObject {
+    @Published private(set) var profileSelection: ProfileSelection
     @Published private(set) var tasks: [ReminderTask]
     @Published private(set) var gracePercentage: Double
     @Published var errorMessage: String?
@@ -23,6 +24,7 @@ final class ReminderStore: ObservableObject {
     private let makeWebDAVClient: (WebDAVSettings) -> WebDAVClient
     private let notificationScheduler: NotificationScheduler
     private var notificationSyncTask: Task<Void, Never>?
+    private var profileLoadFailed = false
 
     init(
         repository: JSONRepository = JSONRepository(),
@@ -33,9 +35,16 @@ final class ReminderStore: ObservableObject {
         self.makeWebDAVClient = makeWebDAVClient
         self.repository = repository
         self.notificationScheduler = notificationScheduler
-        let loadedTasks = repository.load()
-        tasks = loadedTasks
-        gracePercentage = repository.loadGracePercentage()
+        let selection = try? repository.loadProfiles()
+        let selectedProfile = selection?.profiles.first { $0.id == selection?.activeID } ?? .standard
+        let selectedRepository = repository.forProfile(selectedProfile)
+        profileSelection = selection ?? ProfileSelection()
+        tasks = selectedRepository.load()
+        gracePercentage = selectedRepository.loadGracePercentage()
+        if selection == nil {
+            profileLoadFailed = true
+            errorMessage = "读取 Profile 列表失败。请重新打开应用后再试。"
+        }
         do {
             syncBaseline = try repository.loadSyncBaseline()
             lastSyncedAt = syncBaseline?.syncedAt
@@ -51,9 +60,87 @@ final class ReminderStore: ObservableObject {
         synchronizeNotifications(requestAuthorization: false)
     }
 
+    var activeProfile: ReminderProfile {
+        profileSelection.profiles.first { $0.id == profileSelection.activeID } ?? .standard
+    }
+
+    func selectProfile(_ profile: ReminderProfile) {
+        guard profile.id != profileSelection.activeID,
+              profileSelection.profiles.contains(where: { $0.id == profile.id }) else { return }
+        var selection = profileSelection
+        selection.activeID = profile.id
+        changeProfiles(to: selection)
+    }
+
+    func saveProfile(name: String, id: UUID? = nil) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return false }
+        var selection = profileSelection
+        guard !selection.profiles.contains(where: {
+            $0.id != id && $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            errorMessage = "已有同名 Profile，请换一个名称。"
+            return false
+        }
+        if let id {
+            guard let index = selection.profiles.firstIndex(where: { $0.id == id }) else { return false }
+            selection.profiles[index].name = name
+        } else {
+            let profile = ReminderProfile(id: UUID(), name: name)
+            selection.profiles.append(profile)
+            selection.activeID = profile.id
+        }
+        return changeProfiles(to: selection)
+    }
+
+    func deleteProfile(_ profile: ReminderProfile) {
+        guard !profile.isStandard, profileSelection.profiles.contains(where: { $0.id == profile.id }) else { return }
+        var selection = profileSelection
+        selection.profiles.removeAll { $0.id == profile.id }
+        if selection.activeID == profile.id { selection.activeID = ReminderProfile.standard.id }
+        guard changeProfiles(to: selection) else { return }
+        do {
+            try repository.removeProfileData(profile)
+        } catch {
+            errorMessage = "已移除 Profile，清理本机文件失败：\(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    private func changeProfiles(to selection: ProfileSelection) -> Bool {
+        guard !profileLoadFailed else {
+            errorMessage = "Profile 列表读取失败，请重新打开应用后再试。"
+            return false
+        }
+        let isSwitching = selection.activeID != profileSelection.activeID
+        guard !isSwitching || !isSyncing else {
+            errorMessage = "请等待当前 WebDAV 操作结束后再切换 Profile。"
+            return false
+        }
+        do {
+            try repository.saveProfiles(selection)
+        } catch {
+            errorMessage = "保存 Profile 失败：\(error.localizedDescription)"
+            return false
+        }
+        let listChanged = selection.profiles != profileSelection.profiles
+        profileSelection = selection
+        if isSwitching {
+            let selectedRepository = repository.forProfile(activeProfile)
+            tasks = selectedRepository.load()
+            gracePercentage = selectedRepository.loadGracePercentage()
+            scheduleAutomaticSync()
+        }
+        if listChanged { synchronizeNotifications(requestAuthorization: false) }
+        return true
+    }
+
     var sortedTasks: [ReminderTask] {
         tasks.sorted {
-            ($0.nextDueDate ?? .distantFuture) < ($1.nextDueDate ?? .distantFuture)
+            if $0.kind != $1.kind { return $0.kind == .recurring }
+            let first = $0.nextDueDate ?? .distantPast
+            let second = $1.nextDueDate ?? .distantPast
+            return first < second
         }
     }
 
@@ -63,98 +150,105 @@ final class ReminderStore: ObservableObject {
         reminders: [ReminderRule],
         lastCompletedAt: Date? = nil,
         gracePercentage: Double? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        kind: ReminderKind = .recurring
     ) {
         if let lastCompletedAt, lastCompletedAt > now {
-            errorMessage = "自定义上次完成时间不能晚于当前时间。"
+            errorMessage = "自定义上次时间不能晚于当前时间。"
             return
         }
 
-        tasks.insert(
-            ReminderTask.create(
-                name: name,
-                intervalHours: intervalHours,
-                reminders: reminders,
-                lastCompletedAt: lastCompletedAt,
-                now: now
-            ),
-            at: 0
+        var task = ReminderTask.create(
+            name: name, intervalHours: intervalHours, reminders: reminders,
+            lastCompletedAt: lastCompletedAt, now: now, kind: kind
         )
-        tasks[0].gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
-        persist()
-        synchronizeNotifications(requestAuthorization: !reminders.isEmpty)
+        if kind == .recurring { task.gracePercentage = StatisticsCalculator.validGrace(gracePercentage) }
+        persist([task] + tasks, requestAuthorization: !task.reminders.isEmpty)
     }
 
     func update(id: String, name: String, intervalHours: Double, reminders: [ReminderRule], gracePercentage: Double? = nil) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
-        tasks[index].gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
-        tasks[index].update(name: name, intervalHours: intervalHours, reminders: reminders)
-        persist()
-        synchronizeNotifications(requestAuthorization: !reminders.isEmpty)
+        var updated = tasks
+        if updated[index].kind == .recurring {
+            updated[index].gracePercentage = StatisticsCalculator.validGrace(gracePercentage)
+        }
+        updated[index].update(name: name, intervalHours: intervalHours, reminders: reminders)
+        persist(updated, requestAuthorization: !updated[index].reminders.isEmpty)
     }
 
     func complete(id: String, at date: Date = Date()) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
-        tasks[index].complete(at: date)
-        persist()
-        synchronizeNotifications(requestAuthorization: false)
+        var updated = tasks
+        updated[index].complete(at: date)
+        persist(updated, requestAuthorization: false)
     }
 
     @discardableResult
     func backfill(id: String, at date: Date, now: Date = Date()) -> Bool {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return false }
-        guard tasks[index].backfill(at: date, now: now) else {
-            errorMessage = "补记时间必须晚于上次完成时间，且不能晚于当前时间。"
+        var updated = tasks
+        guard updated[index].backfill(at: date, now: now) else {
+            errorMessage = "补记时间必须晚于上次记录的时间，且不能晚于当前时间。"
             return false
         }
-        persist()
-        synchronizeNotifications(requestAuthorization: false)
-        return true
+        return persist(updated, requestAuthorization: false)
     }
 
     func delete(id: String) {
-        tasks.removeAll { $0.id == id }
-        persist()
-        synchronizeNotifications(requestAuthorization: false)
+        persist(tasks.filter { $0.id != id }, requestAuthorization: false)
     }
 
     func replace(with importedTasks: [ReminderTask], gracePercentage: Double = 10) {
-        self.gracePercentage = StatisticsCalculator.validGrace(gracePercentage) ?? 10
         var seenIDs = Set<String>()
-        tasks = importedTasks
+        let updated = importedTasks
             .compactMap { $0.normalized() }
             .filter { seenIDs.insert($0.id).inserted }
-        persist()
-        synchronizeNotifications(requestAuthorization: tasks.contains { !$0.reminders.isEmpty })
+        persist(updated, grace: StatisticsCalculator.validGrace(gracePercentage) ?? 10,
+                requestAuthorization: updated.contains { !$0.reminders.isEmpty })
     }
 
     func setGracePercentage(_ value: Double) {
         guard let value = StatisticsCalculator.validGrace(value) else { return }
-        gracePercentage = value
-        persist()
+        persist(tasks, grace: value)
     }
 
     func refreshNotifications() {
         synchronizeNotifications(requestAuthorization: false)
     }
 
-    private func persist() {
-        editRevision += 1
-        clearSyncConflict()
+    @discardableResult
+    private func persist(_ updated: [ReminderTask], grace: Double? = nil, requestAuthorization: Bool? = nil) -> Bool {
+        let grace = grace ?? gracePercentage
+        let isStandard = activeProfile.isStandard
         do {
-            try repository.save(tasks, gracePercentage: gracePercentage, syncBaseline: syncBaseline)
-            scheduleAutomaticSync()
+            try repository.forProfile(activeProfile).save(
+                updated, gracePercentage: grace, syncBaseline: isStandard ? syncBaseline : nil
+            )
         } catch {
             errorMessage = "保存失败：\(error.localizedDescription)"
+            return false
         }
+        tasks = updated
+        gracePercentage = grace
+        if isStandard {
+            editRevision += 1
+            clearSyncConflict()
+            scheduleAutomaticSync()
+        }
+        if let requestAuthorization { synchronizeNotifications(requestAuthorization: requestAuthorization) }
+        return true
     }
 
 
-    func syncRecoveryFiles() throws -> [URL] { try repository.recoveryFiles() }
+    func syncRecoveryFiles() throws -> [URL] {
+        guard activeProfile.isStandard else { return [] }
+        return try repository.recoveryFiles()
+    }
 
     private var snapshot: SyncSnapshot { SyncSnapshot(tasks: tasks, gracePercentage: gracePercentage) }
 
     func saveWebDAVSettings(_ settings: WebDAVSettings) throws {
+        guard activeProfile.isStandard else { throw WebDAVError.message("WebDAV 同步仅用于默认 Profile。") }
         guard !isSyncing else { throw WebDAVError.message("请等待当前同步完成。") }
         _ = try settings.baseURL()
         try WebDAVKeychain.save(settings)
@@ -167,6 +261,7 @@ final class ReminderStore: ObservableObject {
     }
 
     func disconnectWebDAV() throws {
+        guard activeProfile.isStandard else { throw WebDAVError.message("WebDAV 同步仅用于默认 Profile。") }
         guard !isSyncing else { throw WebDAVError.message("请等待当前同步完成。") }
         try WebDAVKeychain.remove()
         automaticSyncTask?.cancel()
@@ -184,7 +279,7 @@ final class ReminderStore: ObservableObject {
 
     func scheduleAutomaticSync() {
         automaticSyncTask?.cancel()
-        guard webDAVSettings?.automatic == true, syncConflict == nil else { return }
+        guard activeProfile.isStandard, webDAVSettings?.automatic == true, syncConflict == nil else { return }
         let delay = max(5, 60 - Date().timeIntervalSince(lastAutomaticAttempt))
         automaticSyncTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
@@ -199,7 +294,7 @@ final class ReminderStore: ObservableObject {
     func pauseAutomaticSync() { automaticSyncTask?.cancel() }
 
     func testWebDAV() async {
-        guard !isSyncing, let settings = webDAVSettings else { return }
+        guard activeProfile.isStandard, !isSyncing, let settings = webDAVSettings else { return }
         isSyncing = true
         syncStatus = "正在检查连接和读写权限…"
         defer { isSyncing = false }
@@ -213,7 +308,7 @@ final class ReminderStore: ObservableObject {
     enum SyncResolution { case local, remote }
 
     func synchronizeWebDAV(resolution: SyncResolution? = nil) async {
-        guard !isSyncing, let settings = webDAVSettings else { return }
+        guard activeProfile.isStandard, !isSyncing, let settings = webDAVSettings else { return }
         guard !baselineLoadFailed else {
             syncStatus = "本机同步状态读取失败，请先重启应用；仍失败时请导出备份后排查。"
             return
@@ -284,15 +379,19 @@ final class ReminderStore: ObservableObject {
     }
 
     private func synchronizeNotifications(requestAuthorization: Bool) {
+        guard !profileLoadFailed else { return }
         let previousTask = notificationSyncTask
-        let snapshot = tasks
+        let activeID = profileSelection.activeID
+        let profiles = profileSelection.profiles.map { profile in
+            (profile: profile, tasks: profile.id == activeID ? tasks : repository.forProfile(profile).load())
+        }
         let scheduler = notificationScheduler
 
         notificationSyncTask = Task { [weak self] in
             await previousTask?.value
             do {
                 try await scheduler.synchronize(
-                    tasks: snapshot,
+                    profiles: profiles,
                     requestAuthorization: requestAuthorization
                 )
             } catch {

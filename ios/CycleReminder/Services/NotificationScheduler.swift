@@ -21,6 +21,8 @@ enum NotificationSchedulerError: LocalizedError {
 }
 
 actor NotificationScheduler {
+    typealias ProfileTasks = (profile: ReminderProfile, tasks: [ReminderTask])
+
     static let identifierPrefix = "cycle-reminder."
     static let maximumPendingNotifications = 64
 
@@ -30,7 +32,7 @@ actor NotificationScheduler {
         self.center = center
     }
 
-    func synchronize(tasks: [ReminderTask], requestAuthorization: Bool) async throws {
+    func synchronize(profiles: [ProfileTasks], requestAuthorization: Bool) async throws {
         let pending = await center.pendingNotificationRequests()
         let managedIdentifiers = pending
             .map(\.identifier)
@@ -58,7 +60,7 @@ actor NotificationScheduler {
             return
         }
 
-        for plan in Self.plans(for: tasks) {
+        for plan in Self.plans(for: profiles) {
             let timeInterval = plan.fireDate.timeIntervalSinceNow
             guard timeInterval > 0 else { continue }
 
@@ -82,12 +84,17 @@ actor NotificationScheduler {
     }
 
     static func plans(for tasks: [ReminderTask], now: Date = Date()) -> [ScheduledNotificationPlan] {
-        tasks
-            .flatMap { task -> [ScheduledNotificationPlan] in
+        plans(for: [(profile: .standard, tasks: tasks)], now: now)
+    }
+
+    static func plans(for profiles: [ProfileTasks], now: Date = Date()) -> [ScheduledNotificationPlan] {
+        let plans = profiles.flatMap { profile, tasks in
+            tasks.flatMap { task -> [ScheduledNotificationPlan] in
                 guard let dueDate = task.nextDueDate else { return [] }
 
                 return task.reminders.compactMap { rule in
                     guard
+                        task.kind.supports(rule.mode),
                         let fireDate = rule.fireDate(dueDate: dueDate, intervalHours: task.intervalHours),
                         fireDate > now
                     else {
@@ -95,29 +102,29 @@ actor NotificationScheduler {
                     }
 
                     return ScheduledNotificationPlan(
-                        identifier: identifier(taskID: task.id, ruleID: rule.id),
+                        identifier: identifier(profile: profile, taskID: task.id, ruleID: rule.id),
                         taskID: task.id,
-                        title: task.name,
-                        body: notificationBody(for: rule, dueDate: dueDate),
+                        title: profiles.count == 1 ? task.name : "\(profile.name) · \(task.name)",
+                        body: notificationBody(for: rule, dueDate: dueDate, kind: task.kind),
                         fireDate: fireDate
                     )
                 }
             }
-            .sorted {
-                if $0.fireDate == $1.fireDate {
-                    return $0.identifier < $1.identifier
-                }
-                return $0.fireDate < $1.fireDate
+        }
+        return Array(plans.sorted {
+            if $0.fireDate == $1.fireDate {
+                return $0.identifier < $1.identifier
             }
-            .prefix(maximumPendingNotifications)
-            .map { $0 }
+            return $0.fireDate < $1.fireDate
+        }.prefix(maximumPendingNotifications))
     }
 
-    private static func identifier(taskID: String, ruleID: String) -> String {
-        "\(identifierPrefix)\(taskID).\(ruleID)"
+    private static func identifier(profile: ReminderProfile, taskID: String, ruleID: String) -> String {
+        "\(identifierPrefix)\(profile.id.uuidString).\(taskID).\(ruleID)"
     }
 
-    private static func notificationBody(for rule: ReminderRule, dueDate: Date) -> String {
+    private static func notificationBody(for rule: ReminderRule, dueDate: Date, kind: ReminderKind) -> String {
+        if kind == .reverse { return "最短间隔已满，如有需要可以再做。" }
         let dueText = DisplayFormat.dateTime(dueDate)
         switch rule.mode {
         case .due:

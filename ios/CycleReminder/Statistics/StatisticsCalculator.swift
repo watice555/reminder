@@ -38,6 +38,16 @@ struct CompletionStatistics: Equatable {
     let taskRanking: [TaskCompletionRanking]
 }
 
+struct ReverseTaskStatistics: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let total: Int
+    let eligible: Int
+    let early: Int
+
+    var adherenceRate: Double? { eligible == 0 ? nil : Double(eligible - early) / Double(eligible) }
+}
+
 enum StatisticsPeriod: Int, CaseIterable, Identifiable {
     case all = 0, week = 7, month = 30, quarter = 90
     var id: Int { rawValue }
@@ -49,6 +59,23 @@ enum StatisticsPeriod: Int, CaseIterable, Identifiable {
 }
 
 enum StatisticsCalculator {
+    static func calculateReverse(tasks: [ReminderTask], now: Date, window: DateInterval?) -> [ReverseTaskStatistics] {
+        tasks.filter { $0.kind == .reverse }.map { task in
+            let records = task.completions.compactMap { record -> (date: Date, boundary: Date?)? in
+                guard let date = record.completedDate, date <= now,
+                      window.map({ date >= $0.start && date < $0.end }) ?? true else { return nil }
+                return (date, record.scheduledDueDate)
+            }
+            let comparable = records.compactMap { date, boundary in
+                boundary.map { date < $0 }
+            }
+            return ReverseTaskStatistics(
+                id: task.id, name: task.name, total: records.count, eligible: comparable.count,
+                early: comparable.filter { $0 }.count
+            )
+        }
+    }
+
     static func average(_ values: [Double]) -> Double? {
         values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
     }
@@ -80,7 +107,8 @@ enum StatisticsCalculator {
         }
         let todayStart = calendar.startOfDay(for: now)
         let sevenDayStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-        let completions = tasks
+        let recurringTasks = tasks.filter { $0.kind == .recurring }
+        let completions = recurringTasks
             .flatMap(\.completions)
             .compactMap { record -> (record: CompletionRecord, completedAt: Date, dueAt: Date)? in
                 guard
@@ -101,7 +129,7 @@ enum StatisticsCalculator {
             return DailyCompletion(date: date, count: count)
         }
 
-        let taskRanking = tasks.sorted {
+        let taskRanking = recurringTasks.sorted {
             if $0.intervalHours != $1.intervalHours { return $0.intervalHours < $1.intervalHours }
             let nameOrder = $0.name.localizedStandardCompare($1.name)
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }

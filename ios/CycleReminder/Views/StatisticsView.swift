@@ -12,105 +12,130 @@ struct StatisticsView: View {
     var body: some View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 30)) { context in
+                let window = period.window(endingAt: context.date)
                 let statistics = StatisticsCalculator.calculate(
                     tasks: store.tasks, now: context.date, globalGrace: store.gracePercentage,
-                    window: period.window(endingAt: context.date), minimumCompletions: 3
+                    window: window, minimumCompletions: 3
                 )
+                let reverse = StatisticsCalculator.calculateReverse(tasks: store.tasks, now: context.date, window: window)
                 let previous = period.window(endingAt: context.date.addingTimeInterval(-period.duration)).map {
                     StatisticsCalculator.calculate(tasks: store.tasks, now: context.date,
                         globalGrace: store.gracePercentage, window: $0,
                         includeCurrentOverdue: false, minimumCompletions: 3)
                 }
                 List {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("总体准时率").font(.headline)
-                                Button { showingInfo = true } label: {
-                                    Image(systemName: "info.circle")
-                                }.buttonStyle(.plain).foregroundStyle(.secondary)
-                                    .accessibilityLabel("统计说明")
-                            }
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(rate(statistics.onTimeRate))
-                                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                                    .foregroundStyle(rateColor(statistics.onTimeRate))
-                                if let previous, let change = rateChange(statistics.onTimeRate, previous.onTimeRate) {
-                                    Text(change).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Text("\(period.title) · \(statistics.cycleCount) 个周期 · \(statistics.taskRanking.filter { $0.total >= 3 }.count) 个任务")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if statistics.overdueCount > 0 {
-                                overdueLabel(statistics.overdueCount)
-                            }
-                        }.padding(.vertical, 8)
-                    }
-                    Section {
-                        if statistics.taskRanking.isEmpty {
-                            Text("添加任务后，这里会显示统计。")
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(statistics.taskRanking) { item in
-                            let old = previous?.taskRanking.first { $0.id == item.id && $0.total >= 3 }
+                    if !statistics.taskRanking.isEmpty || reverse.isEmpty {
+                        Section {
                             VStack(alignment: .leading, spacing: 8) {
-                                Button {
-                                    if expandedTasks.contains(item.id) { expandedTasks.remove(item.id) }
-                                    else { expandedTasks.insert(item.id) }
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack {
-                                            Text(item.name).font(.headline).foregroundStyle(.primary)
-                                            Spacer()
-                                            Text(item.total >= 3 ? rate(item.onTimeRate) : "样本不足").font(.body.weight(.semibold))
-                                                .foregroundStyle(item.total >= 3 ? rateColor(item.onTimeRate) : .secondary)
-                                            if item.total >= 3 {
-                                                if let old, let change = rateChange(item.onTimeRate, old.onTimeRate) {
-                                                    Text(change).font(.caption).foregroundStyle(.secondary)
-                                                }
-                                                Image(systemName: expandedTasks.contains(item.id) ? "chevron.up" : "chevron.down")
-                                                    .font(.caption2).foregroundStyle(.tertiary)
-                                            }
-                                        }
-                                        if item.total >= 3 {
-                                            HStack {
-                                                Text("平均间隔 \(interval(item.averageIntervalHours))")
-                                                if let old, let change = intervalChange(item.averageIntervalHours, old.averageIntervalHours) {
-                                                    Text(change).font(.caption)
-                                                }
-                                                Spacer(minLength: 4)
-                                                Text(item.medianIntervalRatio.map { "计划比 \(rate($0))" } ?? "计划比 —")
-                                            }.font(.subheadline).foregroundStyle(.secondary)
-                                        } else {
-                                            Text("完成 \(item.total)/3 次，可选择更长周期")
-                                                .font(.caption).foregroundStyle(.secondary)
-                                        }
-                                    }.contentShape(Rectangle())
-                                }.buttonStyle(.plain)
-                                    .disabled(item.total < 3)
-                                    .accessibilityLabel(item.total >= 3 ? "\(item.name)，准时率 \(rate(item.onTimeRate))" : "\(item.name)，样本不足，完成 \(item.total) 次")
-                                    .accessibilityHint(expandedTasks.contains(item.id) ? "收起详情" : "展开详情")
-                                if expandedTasks.contains(item.id) && item.total >= 3 {
-                                    if item.overdueCount > 0 { overdueLabel(item.overdueCount) }
-                                    if previous != nil && old == nil { Text("前期样本不足，暂无对比") }
-                                    if let old = previous?.taskRanking.first(where: { $0.id == item.id }), old.total >= 3 {
-                                        Text("前期准时率 \(rate(old.onTimeRate)) · 平均间隔 \(interval(old.averageIntervalHours)) · 完成 \(old.total) 次")
-                                    }
-                                    Text("本期完成 \(item.total) 次")
-                                    Text("\(item.cycleCount) 个周期 · 宽限 \(DisplayFormat.number(item.gracePercentage))%")
-                                    Text(item.intervalCount == 0
-                                         ? "至少两条完成记录才能计算间隔"
-                                         : "间隔取算术平均数 · \(item.intervalCount) 组相邻完成记录")
+                                HStack {
+                                    Text("总体准时率").font(.headline)
+                                    Button { showingInfo = true } label: {
+                                        Image(systemName: "info.circle")
+                                    }.buttonStyle(.plain).foregroundStyle(.secondary)
+                                        .accessibilityLabel("统计说明")
                                 }
-                            }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 6)
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text(rate(statistics.onTimeRate))
+                                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                                        .foregroundStyle(rateColor(statistics.onTimeRate))
+                                    if let previous, let change = rateChange(statistics.onTimeRate, previous.onTimeRate) {
+                                        Text(change).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text("\(period.title) · \(statistics.cycleCount) 个周期 · \(statistics.taskRanking.filter { $0.total >= 3 }.count) 个任务")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if statistics.overdueCount > 0 {
+                                    overdueLabel(statistics.overdueCount)
+                                }
+                            }.padding(.vertical, 8)
                         }
-                    } header: {
-                        HStack { Text("任务概览"); Spacer(); Text("准时率") }
+                        Section {
+                            if statistics.taskRanking.isEmpty {
+                                Text("添加任务后，这里会显示统计。")
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(statistics.taskRanking) { item in
+                                let old = previous?.taskRanking.first { $0.id == item.id && $0.total >= 3 }
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Button {
+                                        if expandedTasks.contains(item.id) { expandedTasks.remove(item.id) }
+                                        else { expandedTasks.insert(item.id) }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Text(item.name).font(.headline).foregroundStyle(.primary)
+                                                Spacer()
+                                                Text(item.total >= 3 ? rate(item.onTimeRate) : "样本不足").font(.body.weight(.semibold))
+                                                    .foregroundStyle(item.total >= 3 ? rateColor(item.onTimeRate) : .secondary)
+                                                if item.total >= 3 {
+                                                    if let old, let change = rateChange(item.onTimeRate, old.onTimeRate) {
+                                                        Text(change).font(.caption).foregroundStyle(.secondary)
+                                                    }
+                                                    Image(systemName: expandedTasks.contains(item.id) ? "chevron.up" : "chevron.down")
+                                                        .font(.caption2).foregroundStyle(.tertiary)
+                                                }
+                                            }
+                                            if item.total >= 3 {
+                                                HStack {
+                                                    Text("平均间隔 \(interval(item.averageIntervalHours))")
+                                                    if let old, let change = intervalChange(item.averageIntervalHours, old.averageIntervalHours) {
+                                                        Text(change).font(.caption)
+                                                    }
+                                                    Spacer(minLength: 4)
+                                                    Text(item.medianIntervalRatio.map { "计划比 \(rate($0))" } ?? "计划比 —")
+                                                }.font(.subheadline).foregroundStyle(.secondary)
+                                            } else {
+                                                Text("完成 \(item.total)/3 次，可选择更长周期")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }.contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                        .disabled(item.total < 3)
+                                        .accessibilityLabel(item.total >= 3 ? "\(item.name)，准时率 \(rate(item.onTimeRate))" : "\(item.name)，样本不足，完成 \(item.total) 次")
+                                        .accessibilityHint(expandedTasks.contains(item.id) ? "收起详情" : "展开详情")
+                                    if expandedTasks.contains(item.id) && item.total >= 3 {
+                                        if item.overdueCount > 0 { overdueLabel(item.overdueCount) }
+                                        if previous != nil && old == nil { Text("前期样本不足，暂无对比") }
+                                        if let old = previous?.taskRanking.first(where: { $0.id == item.id }), old.total >= 3 {
+                                            Text("前期准时率 \(rate(old.onTimeRate)) · 平均间隔 \(interval(old.averageIntervalHours)) · 完成 \(old.total) 次")
+                                        }
+                                        Text("本期完成 \(item.total) 次")
+                                        Text("\(item.cycleCount) 个周期 · 宽限 \(DisplayFormat.number(item.gracePercentage))%")
+                                        Text(item.intervalCount == 0
+                                             ? "至少两条完成记录才能计算间隔"
+                                             : "间隔取算术平均数 · \(item.intervalCount) 组相邻完成记录")
+                                    }
+                                }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 6)
+                            }
+                        } header: {
+                            HStack { Text("任务概览"); Spacer(); Text("准时率") }
+                        }
+                    }
+                    if !reverse.isEmpty {
+                        Section {
+                            ForEach(reverse) { item in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text(item.name).font(.headline)
+                                        Spacer()
+                                        Text(item.adherenceRate.map { "达标 \(rate($0))" } ?? "暂无可比较间隔")
+                                            .foregroundStyle(rateColor(item.adherenceRate))
+                                    }
+                                    Text("\(period.title) · 记录 \(item.total) 次 · 提前 \(item.early) 次")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }.padding(.vertical, 6)
+                            }
+                        } header: {
+                            Text("反向任务")
+                        } footer: {
+                            Text("达标率按实际记录计算。没有上次时间的首条记录只计入次数，未记录的时段不计入达标率。")
+                        }
                     }
                 }
             }
             .navigationTitle("统计")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) { ProfileMenu() }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Menu {
                         Picker("统计周期", selection: $periodValue) {
@@ -127,6 +152,7 @@ struct StatisticsView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { StatisticsSettingsView() }
+            .onChange(of: store.activeProfile.id) { _ in expandedTasks.removeAll() }
             .sheet(isPresented: $showingInfo) {
                 NavigationStack {
                     List {
@@ -213,10 +239,10 @@ private struct StatisticsSettingsView: View {
             Form {
                 Section {
                     HStack {
-                        Text("全局宽限")
+                        Text("当前 Profile 宽限")
                         TextField("10", text: $graceText)
                             .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                            .accessibilityLabel("全局宽限百分比")
+                            .accessibilityLabel("当前 Profile 宽限百分比")
                         Text("%")
                     }
                 } footer: {
